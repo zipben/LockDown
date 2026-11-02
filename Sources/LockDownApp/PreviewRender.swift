@@ -39,10 +39,18 @@ enum PreviewRender {
             let root = ContentView(initialTab: tab).environmentObject(store)
             save(root, size: CGSize(width: 1100, height: 900), to: "\(dir)/\(name).png")
         }
-        let model = FrozenModel()
-        model.blockName = "Bedtime"
-        model.endsAt = now.addingTimeInterval(3723)
-        save(FrozenView(model: model), size: CGSize(width: 1100, height: 700), to: "\(dir)/frozen.png")
+        for (name, lock, locked, challenge) in [("frozen-unlocked", LockPolicy.none, false, nil as String?),
+                                                ("frozen-random", .randomText(length: 40), true, LockEngine.randomString(40)),
+                                                ("frozen-timer", .timer, true, nil)] {
+            let model = FrozenModel()
+            model.blockID = frozen.id
+            model.blockName = "Bedtime"
+            model.endsAt = now.addingTimeInterval(3723)
+            model.lock = lock
+            model.locked = locked
+            model.challenge = challenge
+            save(FrozenView(model: model), size: CGSize(width: 1100, height: 760), to: "\(dir)/\(name).png")
+        }
     }
 
     @MainActor

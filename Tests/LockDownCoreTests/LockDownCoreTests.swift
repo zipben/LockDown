@@ -170,6 +170,28 @@ final class LockEngineTests: XCTestCase {
         XCTAssertThrowsError(try e.save(shorter, newPassword: nil, into: &s, now: at(20), bootID: "A"))
     }
 
+    func testStoppingScheduledRunSkipsRestOfWindow() throws {
+        let e = LockEngine(calendar: cal)
+        var s = EngineState()
+        let b = Block(name: "Night", kind: .frozen, scheduleEnabled: true,
+                      schedule: [ScheduleRange(weekday: 2, startMinute: 1260, endMinute: 1380)])
+        s.blocks = [b]
+        XCTAssertTrue(e.activity(of: b, in: s, now: at(21, 30)).enforcing)
+        XCTAssertEqual(e.enforcement(for: s, now: at(21, 30), bootID: "A").frozen?.locked, false)
+        try e.stop(b.id, in: &s, now: at(21, 30), bootID: "A")
+        XCTAssertFalse(e.activity(of: b, in: s, now: at(21, 31)).running)
+        XCTAssertNil(e.enforcement(for: s, now: at(21, 31), bootID: "A").frozen)
+        e.housekeep(&s, now: at(23, 1), bootID: "A")
+        XCTAssertTrue(s.skips.isEmpty, "skip expires with the window")
+    }
+
+    func testOldStateFileWithoutSkipsDecodes() throws {
+        let json = #"{"blocks":[],"sessions":[],"breaks":[],"allowanceUsed":{},"lockBoot":[],"grants":[],"settings":{"blockActivityMonitor":false,"blockTerminals":false,"blockSystemSettings":false,"hardBlockIPs":false,"fallbackDNS":["1.1.1.1"],"statsEnabled":true}}"#
+        let s = try Wire.decoder.decode(EngineState.self, from: Data(json.utf8))
+        XCTAssertTrue(s.skips.isEmpty)
+        XCTAssertEqual(s.settings.fallbackDNS, ["1.1.1.1"])
+    }
+
     func testEnforcementMergesAndStrictApps() throws {
         let e = LockEngine(calendar: cal)
         var s = EngineState()

@@ -216,10 +216,11 @@ struct BlockEditor: View {
                 .buttonStyle(PixelButtonStyle(color: Pixel.green, size: 9))
                 .disabled(dirty)
                 .help(dirty ? "Save changes first" : "Start a timed run")
-            if s.activity.source == .timer {
+            if s.activity.running {
                 Button("STOP") { store.send(Request(.stopBlock, blockID: s.id)) }
                     .buttonStyle(PixelButtonStyle(color: Pixel.red, size: 9))
                     .disabled(s.locked)
+                    .help(s.activity.source == .schedule ? "Skip the rest of this scheduled window" : "Stop this run")
             }
         }
     }

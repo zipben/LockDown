@@ -139,9 +139,13 @@ final class Agent: NSObject, NSApplicationDelegate {
             if !frozenWindows.isEmpty { unfreeze() }
             return
         }
+        if frozenModel.blockID != f.blockID { frozenModel.reset() }
+        frozenModel.blockID = f.blockID
         frozenModel.blockName = f.blockName
         frozenModel.endsAt = f.endsAt
         frozenModel.mode = f.mode
+        frozenModel.lock = f.lock
+        frozenModel.locked = f.locked
         frozenModel.skew = daemonSkew
         if frozenWindows.isEmpty { freeze() }
         reassertFrozen()
@@ -158,8 +162,24 @@ final class Agent: NSObject, NSApplicationDelegate {
     private func freeze() {
         frozenStartedAt = Date()
         frozenActionTaken = false
+        frozenModel.send = { [weak self] req in
+            Task.detached {
+                let result = Result { try DaemonClient.send(req) }
+                await MainActor.run {
+                    switch result {
+                    case .success(let r):
+                        self?.frozenModel.message = nil
+                        if let c = r.challenge { self?.frozenModel.challenge = c }
+                    case .failure(let e):
+                        self?.frozenModel.message = "\(e)"
+                        if req.cmd == .solveChallenge { self?.frozenModel.challenge = nil }
+                    }
+                    self?.poll()
+                }
+            }
+        }
         for screen in NSScreen.screens {
-            let w = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false, screen: screen)
+            let w = KeyableWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false, screen: screen)
             w.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
             w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
             w.isOpaque = true
@@ -185,7 +205,14 @@ final class Agent: NSObject, NSApplicationDelegate {
         for w in frozenWindows { w.orderOut(nil) }
         frozenWindows = []
         frozenStartedAt = nil
+        frozenModel.reset()
     }
+}
+
+/// Borderless windows can't take keyboard focus by default; the freeze screen needs it for unlock text.
+final class KeyableWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 @MainActor
@@ -194,7 +221,18 @@ final class FrozenModel: ObservableObject {
     @Published var endsAt: Date?
     @Published var mode: FrozenMode = .lockScreen
     @Published var actionCountdown: Int?
+    @Published var blockID: UUID?
+    @Published var lock: LockPolicy = .none
+    @Published var locked = false
+    @Published var challenge: String?
+    @Published var message: String?
     var skew: TimeInterval = 0
+    var send: (Request) -> Void = { _ in }
+
+    func reset() {
+        challenge = nil
+        message = nil
+    }
 }
 
 struct FrozenView: View {
@@ -221,9 +259,83 @@ struct FrozenView: View {
                 } else {
                     Text("GO OUTSIDE. SEE YOU SOON.").font(Pixel.font(12)).foregroundStyle(Pixel.inkDim).blinking(0.8)
                 }
+                FrozenEscape(model: model)
+                    .padding(.top, 10)
             }
             Scanlines()
         }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick = $0 }
+    }
+}
+
+/// The way out of a freeze, matching its lock: STOP when unlocked, an unlock challenge for
+/// random-text and password locks, nothing for timer and restart locks.
+struct FrozenEscape: View {
+    @ObservedObject var model: FrozenModel
+    @State private var typed = ""
+    @State private var password = ""
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if let id = model.blockID {
+                if !model.locked {
+                    Button("STOP FREEZE") { model.send(Request(.stopBlock, blockID: id)) }
+                        .buttonStyle(PixelButtonStyle(color: Pixel.ice))
+                } else {
+                    locked(id)
+                }
+            }
+            if let m = model.message {
+                Text(m.uppercased()).font(Pixel.font(9)).foregroundStyle(Pixel.red)
+                    .multilineTextAlignment(.center).frame(maxWidth: 640)
+            }
+        }
+    }
+
+    @ViewBuilder
+    func locked(_ id: UUID) -> some View {
+        switch model.lock {
+        case .randomText:
+            if let c = model.challenge {
+                VStack(spacing: 10) {
+                    Text("TYPE THIS EXACTLY:").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim)
+                    Text(c).font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(Pixel.ink)
+                        .frame(maxWidth: 640).fixedSize(horizontal: false, vertical: true)
+                    TextField("", text: $typed)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16, design: .monospaced))
+                        .padding(8).frame(maxWidth: 640)
+                        .background(Pixel.panel).overlay(Rectangle().stroke(Pixel.panelHi, lineWidth: 2))
+                        .onChange(of: typed) { old, new in
+                            if new.count > old.count + 1 { typed = old; model.message = "No pasting! Type it." }
+                        }
+                    Button("SUBMIT (\(typed.count)/\(c.count))") {
+                        model.send(Request(.solveChallenge, blockID: id, text: typed))
+                        typed = ""
+                    }
+                    .buttonStyle(PixelButtonStyle(color: Pixel.yellow))
+                    .disabled(typed.count != c.count)
+                }
+            } else {
+                Button("UNLOCK") { model.send(Request(.requestChallenge, blockID: id)) }
+                    .buttonStyle(PixelButtonStyle(color: Pixel.yellow))
+            }
+        case .password:
+            HStack(spacing: 10) {
+                PixelField(placeholder: "PASSWORD", text: $password, secure: true).frame(width: 300)
+                Button("UNLOCK") {
+                    model.send(Request(.submitPassword, blockID: id, text: password))
+                    password = ""
+                }
+                .buttonStyle(PixelButtonStyle(color: Pixel.yellow))
+                .disabled(password.isEmpty)
+            }
+        case .timer:
+            Text("TIMER LOCK: NO CONTINUES.").font(Pixel.font(9)).foregroundStyle(Pixel.inkMuted)
+        case .restart:
+            Text("RESTART YOUR MAC TO UNLOCK.").font(Pixel.font(9)).foregroundStyle(Pixel.inkMuted)
+        case .none:
+            EmptyView()
+        }
     }
 }

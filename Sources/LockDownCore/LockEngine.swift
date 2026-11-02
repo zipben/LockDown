@@ -13,9 +13,28 @@ public struct EngineState: Codable {
     public var lockBoot: [UUID: String] = [:]
     /// Temporary unlocks granted after solving a challenge: block -> valid until.
     public var grants: [UUID: Date] = [:]
+    /// Scheduled runs stopped early: block -> skip the schedule until this time (the window's end).
+    public var skips: [UUID: Date] = [:]
     public var settings = GlobalSettings()
 
     public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, settings
+    }
+
+    /// Tolerates missing keys so state files from older versions still load.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        blocks = try c.decodeIfPresent([Block].self, forKey: .blocks) ?? []
+        sessions = try c.decodeIfPresent([UUID: Session].self, forKey: .sessions) ?? [:]
+        breaks = try c.decodeIfPresent([UUID: Date].self, forKey: .breaks) ?? [:]
+        allowanceUsed = try c.decodeIfPresent([String: Int].self, forKey: .allowanceUsed) ?? [:]
+        lockBoot = try c.decodeIfPresent([UUID: String].self, forKey: .lockBoot) ?? [:]
+        grants = try c.decodeIfPresent([UUID: Date].self, forKey: .grants) ?? [:]
+        skips = try c.decodeIfPresent([UUID: Date].self, forKey: .skips) ?? [:]
+        settings = try c.decodeIfPresent(GlobalSettings.self, forKey: .settings) ?? GlobalSettings()
+    }
 }
 
 /// What a block is doing right now.
@@ -43,9 +62,13 @@ public struct Activity: Codable, Hashable {
 }
 
 public struct FrozenEnforcement: Codable, Hashable {
+    public var blockID: UUID
     public var blockName: String
     public var mode: FrozenMode
     public var endsAt: Date?
+    /// The block's lock with any password hash removed; the freeze screen offers the matching way out.
+    public var lock: LockPolicy
+    public var locked: Bool
 }
 
 /// The rules every enforcer (DNS, pf, agent) should apply right now.
@@ -97,7 +120,8 @@ public struct LockEngine {
             start = s.startedAt
             end = s.endsAt
         }
-        if block.scheduleEnabled, let window = scheduleWindow(block.schedule, at: now) {
+        let skipped = state.skips[block.id].map { now < $0 } ?? false
+        if block.scheduleEnabled, !skipped, let window = scheduleWindow(block.schedule, at: now) {
             if source == .none {
                 source = .schedule
                 start = window.start
@@ -195,6 +219,7 @@ public struct LockEngine {
         state.sessions = state.sessions.filter { $0.value.endsAt.map { $0 > now } ?? true }
         state.breaks = state.breaks.filter { $0.value > now }
         state.grants = state.grants.filter { $0.value > now }
+        state.skips = state.skips.filter { $0.value > now }
         let today = dayKey(now)
         let weekAgo = dayKey(now.addingTimeInterval(-7 * 86400))
         state.allowanceUsed = state.allowanceUsed.filter { String($0.key.prefix(10)) >= weekAgo || $0.key.hasPrefix(today) }
@@ -299,6 +324,7 @@ public struct LockEngine {
         }
         state.sessions[id] = Session(startedAt: state.sessions[id]?.startedAt ?? now, endsAt: endsAt)
         state.breaks[id] = nil
+        state.skips[id] = nil
     }
 
     public func stop(_ id: UUID, in state: inout EngineState, now: Date, bootID: String) throws {
@@ -308,6 +334,10 @@ public struct LockEngine {
         }
         state.sessions[id] = nil
         state.breaks[id] = nil
+        // Stopping during a scheduled window skips the rest of that window.
+        if b.scheduleEnabled, let window = scheduleWindow(b.schedule, at: now) {
+            state.skips[id] = window.end
+        }
     }
 
     public func allowanceRemaining(_ block: Block, in state: EngineState, now: Date) -> Int? {
@@ -377,7 +407,8 @@ public struct LockEngine {
                 default: later = e.frozen == nil
                 }
                 if later {
-                    e.frozen = FrozenEnforcement(blockName: b.name, mode: b.frozenMode, endsAt: act.endsAt)
+                    e.frozen = FrozenEnforcement(blockID: b.id, blockName: b.name, mode: b.frozenMode, endsAt: act.endsAt,
+                                                 lock: b.redacted.lock, locked: isLocked(b, in: state, now: now, bootID: bootID))
                 }
                 continue
             }
