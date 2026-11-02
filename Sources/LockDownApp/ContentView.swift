@@ -8,6 +8,7 @@ enum Tab: String, CaseIterable {
 struct ContentView: View {
     @EnvironmentObject var store: Store
     @State private var tab: Tab
+    @AppStorage(TextSize.key) private var textScale: Double = TextSize.large.rawValue
 
     init(initialTab: Tab = .blocks) {
         _tab = State(initialValue: initialTab)
@@ -32,7 +33,9 @@ struct ContentView: View {
             Scanlines()
             if let d = store.dialog { DialogView(dialog: d) { store.dialog = nil } }
         }
-        .frame(minWidth: 980, minHeight: 680)
+        // Fonts read the scale directly, so rebuild the tree when it changes.
+        .id(textScale)
+        .frame(minWidth: Pixel.ui(760), minHeight: Pixel.ui(520))
         .preferredColorScheme(.dark)
     }
 }
@@ -120,7 +123,7 @@ struct InsertCoinScreen: View {
             Text("INSERT COIN").font(Pixel.font(28)).foregroundStyle(Pixel.yellow).blinking(0.7)
             Text("The LockDown daemon isn't running.\nInstall it once with your admin password:")
                 .font(Pixel.font(10)).foregroundStyle(Pixel.inkDim).multilineTextAlignment(.center).lineSpacing(8)
-            Text(command).font(.system(size: 13, design: .monospaced)).foregroundStyle(Pixel.green)
+            Text(command).font(Pixel.mono(13)).foregroundStyle(Pixel.green)
                 .textSelection(.enabled)
                 .padding(12).background(Pixel.panel).overlay(Rectangle().stroke(Pixel.panelHi, lineWidth: 2))
             Button("COPY COMMAND") {

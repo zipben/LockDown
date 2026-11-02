@@ -10,15 +10,34 @@ enum Pixel {
         CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
     }
 
-    static func font(_ size: CGFloat) -> Font { .custom(fontName, fixedSize: size) }
+    /// User-chosen text scale (OPTIONS > TEXT SIZE). Shared by the app and the agent's freeze screen.
+    static var scale: CGFloat {
+        let v = prefs.double(forKey: TextSize.key)
+        return v > 0 ? v : TextSize.large.rawValue
+    }
+
+    static var prefs: UserDefaults {
+        Bundle.main.bundleIdentifier == "com.lockdown.app" ? .standard : (UserDefaults(suiteName: "com.lockdown.app") ?? .standard)
+    }
+
+    /// Pixel font at `size` design points, scaled; never below 11pt so small labels stay legible.
+    static func font(_ size: CGFloat) -> Font { .custom(fontName, fixedSize: max(11, (size * scale).rounded())) }
+
+    /// Monospaced system font for challenge strings and commands, scaled the same way.
+    static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: (size * min(scale, 1.6)).rounded(), weight: weight, design: .monospaced)
+    }
+
+    /// Scales a layout dimension with the text size.
+    static func ui(_ v: CGFloat) -> CGFloat { (v * scale).rounded() }
 
     // Palette: a dark arcade cabinet with neon accents.
     static let bg = Color(hex: 0x0E0B1F)
     static let panel = Color(hex: 0x1C1838)
     static let panelHi = Color(hex: 0x2A2552)
     static let ink = Color(hex: 0xF4F1E8)
-    static let inkDim = Color(hex: 0xA39FC2)
-    static let inkMuted = Color(hex: 0x6E6A91)
+    static let inkDim = Color(hex: 0xCFCBEA)
+    static let inkMuted = Color(hex: 0xA6A2C8)
     static let edge = Color(hex: 0x000000)
     static let green = Color(hex: 0x3DDC84)
     static let red = Color(hex: 0xFF4D6D)
@@ -26,6 +45,19 @@ enum Pixel {
     static let cyan = Color(hex: 0x4CC9F0)
     static let magenta = Color(hex: 0xF15BB5)
     static let ice = Color(hex: 0xA8E6FF)
+}
+
+enum TextSize: CGFloat, CaseIterable {
+    case medium = 1.25, large = 1.5, huge = 1.85
+    static let key = "textScale"
+
+    var label: String {
+        switch self {
+        case .medium: return "MEDIUM"
+        case .large: return "LARGE"
+        case .huge: return "HUGE"
+        }
+    }
 }
 
 extension Color {
@@ -242,7 +274,7 @@ struct Scanlines: View {
         Canvas { ctx, size in
             var y: CGFloat = 0
             while y < size.height {
-                ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.18)))
+                ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.10)))
                 y += 3
             }
         }

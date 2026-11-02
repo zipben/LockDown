@@ -10,7 +10,7 @@ struct BlocksScreen: View {
     var body: some View {
         HStack(spacing: 0) {
             BlockList(newDraft: $newDraft)
-                .frame(width: 290)
+                .frame(width: Pixel.ui(250))
             Rectangle().fill(Pixel.edge).frame(width: 3)
             Group {
                 if let draft = newDraft {
@@ -527,7 +527,7 @@ struct Overlay<Content: View>: View {
             Color.black.opacity(0.65).ignoresSafeArea()
             content()
                 .padding(24)
-                .frame(maxWidth: 560)
+                .frame(maxWidth: Pixel.ui(480))
                 .background(PixelRect(step: 6).fill(Pixel.panel))
                 .overlay(PixelRect(step: 6).stroke(Pixel.yellow, lineWidth: 3))
         }

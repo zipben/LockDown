@@ -299,11 +299,11 @@ struct FrozenEscape: View {
             if let c = model.challenge {
                 VStack(spacing: 10) {
                     Text("TYPE THIS EXACTLY:").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim)
-                    Text(c).font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(Pixel.ink)
+                    Text(c).font(Pixel.mono(16, weight: .bold)).foregroundStyle(Pixel.ink)
                         .frame(maxWidth: 640).fixedSize(horizontal: false, vertical: true)
                     TextField("", text: $typed)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 16, design: .monospaced))
+                        .font(Pixel.mono(16))
                         .padding(8).frame(maxWidth: 640)
                         .background(Pixel.panel).overlay(Rectangle().stroke(Pixel.panelHi, lineWidth: 2))
                         .onChange(of: typed) { old, new in

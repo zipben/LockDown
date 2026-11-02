@@ -121,12 +121,12 @@ struct UnlockSheet: View {
             if let c = challenge {
                 Text("TYPE THIS EXACTLY:").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim)
                 // Rendered as plain, non-selectable text so it can't be copied.
-                Text(c).font(.system(size: 15, weight: .bold, design: .monospaced)).foregroundStyle(Pixel.ink)
+                Text(c).font(Pixel.mono(15, weight: .bold)).foregroundStyle(Pixel.ink)
                     .lineSpacing(4).fixedSize(horizontal: false, vertical: true)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(Pixel.bg)
                 TextField("", text: $typed)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15, design: .monospaced))
+                    .font(Pixel.mono(15))
                     .padding(8).background(Pixel.bg).overlay(Rectangle().stroke(Pixel.panelHi, lineWidth: 2))
                     .onChange(of: typed) { old, new in
                         // Reject pastes: only one new character at a time is allowed.
@@ -220,8 +220,8 @@ struct ScheduleGrid: View {
 
     static let rowWeekdays = [2, 3, 4, 5, 6, 7, 1]
     static let rowNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
-    let labelWidth: CGFloat = 40
-    let cellH: CGFloat = 16
+    var labelWidth: CGFloat { Pixel.ui(36) }
+    var cellH: CGFloat { Pixel.ui(14) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

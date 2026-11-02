@@ -37,7 +37,7 @@ enum PreviewRender {
         for (name, tab, s) in tabs {
             let store = Store(preview: s)
             let root = ContentView(initialTab: tab).environmentObject(store)
-            save(root, size: CGSize(width: 1100, height: 900), to: "\(dir)/\(name).png")
+            save(root, size: CGSize(width: 1400, height: 1000), to: "\(dir)/\(name).png")
         }
         for (name, lock, locked, challenge) in [("frozen-unlocked", LockPolicy.none, false, nil as String?),
                                                 ("frozen-random", .randomText(length: 40), true, LockEngine.randomString(40)),

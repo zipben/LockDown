@@ -87,6 +87,7 @@ struct BlockedBarChart: View {
 
 struct SettingsScreen: View {
     @EnvironmentObject var store: Store
+    @AppStorage(TextSize.key) private var textScale: Double = TextSize.large.rawValue
     @State private var draft: GlobalSettings?
     @State private var dnsText = ""
 
@@ -96,6 +97,14 @@ struct SettingsScreen: View {
                 HStack(spacing: 12) {
                     Sprites.gear(4)
                     Text("OPTIONS").font(Pixel.font(18)).foregroundStyle(Pixel.yellow)
+                }
+                PixelPanel(title: "TEXT SIZE", accent: Pixel.yellow) {
+                    HStack(spacing: 8) {
+                        ForEach(TextSize.allCases, id: \.self) { t in
+                            PixelChip(label: t.label, selected: abs(textScale - Double(t.rawValue)) < 0.01) { textScale = Double(t.rawValue) }
+                        }
+                    }
+                    Text("Applies right away, including the freeze screen.").font(Pixel.font(7)).foregroundStyle(Pixel.inkMuted)
                 }
                 if let d = Binding($draft) {
                     PixelPanel(title: "STRICT MODE (WHILE A BLOCK IS LOCKED)", accent: Pixel.red) {
@@ -132,7 +141,7 @@ struct SettingsScreen: View {
                     Text("Uninstalling is refused while any block is locked:")
                         .font(Pixel.font(8)).foregroundStyle(Pixel.inkDim)
                     Text("sudo \"/Applications/LockDown.app/Contents/Resources/uninstall.sh\"")
-                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(Pixel.ink).textSelection(.enabled)
+                        .font(Pixel.mono(12)).foregroundStyle(Pixel.ink).textSelection(.enabled)
                 }
             }
             .padding(20)
