@@ -342,7 +342,7 @@ struct BlockEditor: View {
         PixelPanel(title: "LOCK", accent: Pixel.yellow) {
             HStack(spacing: 8) {
                 PixelChip(label: "NONE", selected: draft.lock == .none) { draft.lock = .none }
-                PixelChip(label: "TIMER", selected: draft.lock == .timer) { draft.lock = .timer }
+                PixelChip(label: "LOCKED IN", selected: draft.lock == .timer) { draft.lock = .timer }
                 PixelChip(label: "RANDOM TEXT", selected: isRandom) { draft.lock = .randomText(length: 60) }
                 PixelChip(label: "PASSWORD", selected: isPassword) { draft.lock = .password(salt: "", hash: "") }
                 PixelChip(label: "RESTART", selected: draft.lock == .restart) { draft.lock = .restart }
@@ -370,7 +370,7 @@ struct BlockEditor: View {
     var lockHelp: String {
         switch draft.lock {
         case .none: return "No lock. You can stop or edit this block any time."
-        case .timer: return "No continues. Once running it can't be stopped or loosened until it ends."
+        case .timer: return "No way out. Once started it can't be stopped or loosened until the run you picked (or the schedule window) ends."
         case .randomText: return "To unlock, type a fresh random string by hand. No pasting."
         case .password: return "Give the password to someone you trust. Only a hash is stored."
         case .restart: return "Unlocks only after you restart your Mac."

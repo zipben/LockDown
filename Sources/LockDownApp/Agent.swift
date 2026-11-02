@@ -331,7 +331,7 @@ struct FrozenEscape: View {
                 .disabled(password.isEmpty)
             }
         case .timer:
-            Text("TIMER LOCK: NO CONTINUES.").font(Pixel.font(9)).foregroundStyle(Pixel.inkMuted)
+            Text("LOCKED IN: NO CONTINUES.").font(Pixel.font(9)).foregroundStyle(Pixel.inkMuted)
         case .restart:
             Text("RESTART YOUR MAC TO UNLOCK.").font(Pixel.font(9)).foregroundStyle(Pixel.inkMuted)
         case .none:

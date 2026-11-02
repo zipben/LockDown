@@ -15,6 +15,7 @@ struct StartSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(status.activity.source == .timer ? "EXTEND RUN" : "START RUN").font(Pixel.font(14)).foregroundStyle(Pixel.green)
             Text(status.block.name.uppercased()).font(Pixel.font(9)).foregroundStyle(Pixel.inkDim)
+            Text("HOW LONG SHOULD IT RUN?").font(Pixel.font(8)).foregroundStyle(Pixel.ink)
             FlowLayout(spacing: 8) {
                 ForEach(presets, id: \.1) { p in
                     PixelChip(label: p.0, selected: !untilStopped && minutes == p.1, color: Pixel.green) {
@@ -34,7 +35,7 @@ struct StartSheet: View {
             if status.block.lock != .none {
                 HStack(spacing: 8) {
                     Sprites.lock(2)
-                    Text("LOCKED WITH \(status.block.lock.label) ONCE STARTED")
+                    Text("LOCK: \(status.block.lock.label) - APPLIES ONCE STARTED")
                         .font(Pixel.font(7)).foregroundStyle(Pixel.yellow)
                 }
             }
@@ -143,7 +144,7 @@ struct UnlockSheet: View {
         case .restart:
             Text("This block unlocks after you restart your Mac.").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim).lineSpacing(5)
         case .timer:
-            Text("NO CONTINUES. A timer lock only ends when the block does.").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim).lineSpacing(5)
+            Text("NO CONTINUES. A locked-in block only ends when its run does.").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim).lineSpacing(5)
         case .none:
             Text("Not locked.").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim)
         }

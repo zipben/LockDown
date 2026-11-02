@@ -309,7 +309,7 @@ public struct LockEngine {
         guard let b = state.blocks.first(where: { $0.id == id }) else { throw EngineError.notFound }
         if let e = endsAt, e <= now { throw EngineError.invalid("End time must be in the future.") }
         if endsAt == nil, b.lock == .timer {
-            throw EngineError.invalid("A timer lock needs an end time.")
+            throw EngineError.invalid("A locked-in block needs an end time.")
         }
         if let current = state.sessions[id], isLocked(b, in: state, now: now, bootID: bootID) {
             // Locked runs can only be extended.

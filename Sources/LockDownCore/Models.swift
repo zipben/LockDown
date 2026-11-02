@@ -58,7 +58,7 @@ public enum LockPolicy: Codable, Hashable {
     public var label: String {
         switch self {
         case .none: return "NONE"
-        case .timer: return "TIMER"
+        case .timer: return "LOCKED IN"
         case .randomText(let n): return "RANDOM TEXT (\(n))"
         case .password: return "PASSWORD"
         case .restart: return "RESTART"
