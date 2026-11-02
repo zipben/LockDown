@@ -46,7 +46,7 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Sprites.mascot(3)
+            Logo(pixel: Pixel.ui(2.5))
             VStack(alignment: .leading, spacing: 6) {
                 Text("LOCKDOWN").font(Pixel.font(20)).foregroundStyle(Pixel.yellow)
                     .shadow(color: Pixel.red, radius: 0, x: 3, y: 3)
@@ -119,7 +119,7 @@ struct InsertCoinScreen: View {
     var body: some View {
         VStack(spacing: 26) {
             Spacer()
-            Sprites.mascot(8)
+            Logo(pixel: 9)
             Text("INSERT COIN").font(Pixel.font(28)).foregroundStyle(Pixel.yellow).blinking(0.7)
             Text("The LockDown daemon isn't running.\nInstall it once with your admin password:")
                 .font(Pixel.font(10)).foregroundStyle(Pixel.inkDim).multilineTextAlignment(.center).lineSpacing(8)

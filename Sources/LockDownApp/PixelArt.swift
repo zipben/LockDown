@@ -142,23 +142,30 @@ enum Sprites {
             "...ww...",
         ], palette: ["w": Pixel.inkDim, "k": Pixel.bg], scale: scale)
     }
+}
 
-    /// LockDown's mascot: a little padlock robot with an antenna. Original design.
-    static func mascot(_ scale: CGFloat = 4) -> Sprite {
-        Sprite(rows: [
-            ".....r.....",
-            ".....k.....",
-            "...kkkkk...",
-            "..k.....k..",
-            "..k.....k..",
-            ".kkkkkkkkk.",
-            ".kyyyyyyyk.",
-            ".kyWkykWyk.",
-            ".kyyyyyyyk.",
-            ".kyykkkyyk.",
-            ".kyyyyyyyk.",
-            ".kkkkkkkkk.",
-            "..kk...kk..",
-        ], palette: ["k": k, "y": Pixel.yellow, "W": .white, "r": Pixel.red], scale: scale)
+/// LockDown's logo: the padlock tile from Kenney's 1-Bit Pack (CC0, www.kenney.nl), drawn with
+/// nearest-neighbour scaling and tinted to the theme. `pixel` is the size of one source pixel.
+struct Logo: View {
+    var pixel: CGFloat = 3
+    var color: Color = Pixel.yellow
+
+    static let image: NSImage? = Bundle.main.url(forResource: "padlock-kenney-1bit", withExtension: "png")
+        .flatMap { NSImage(contentsOf: $0) }
+
+    var body: some View {
+        Group {
+            if let img = Logo.image {
+                Image(nsImage: img)
+                    .renderingMode(.template)
+                    .interpolation(.none)
+                    .resizable()
+                    .foregroundStyle(color)
+            } else {
+                Sprites.lock(pixel * 16 / 9, color: color)
+            }
+        }
+        .frame(width: 16 * pixel, height: 16 * pixel)
+        .accessibilityLabel("LockDown")
     }
 }

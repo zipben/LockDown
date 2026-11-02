@@ -33,7 +33,7 @@ struct EmptyLevel: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Sprites.mascot(6)
+            Logo(pixel: 7)
             Text("NO BLOCKS YET").font(Pixel.font(14)).foregroundStyle(Pixel.ink)
             Text("PRESS START").font(Pixel.font(10)).foregroundStyle(Pixel.yellow).blinking()
             Button("+ NEW BLOCK", action: create).buttonStyle(PixelButtonStyle())

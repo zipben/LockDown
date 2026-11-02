@@ -49,4 +49,8 @@ Logs: `/var/log/lockdownd.log`. State: `/Library/Application Support/LockDown/`.
 
 `LockDown --render-preview <dir>` renders the main screens with sample data to PNGs.
 
-Font: Press Start 2P (SIL Open Font License, `Resources/OFL-PressStart2P.txt`).
+## Credits
+
+- Logo: padlock tile from [1-Bit Pack](https://www.kenney.nl/assets/1-bit-pack) by Kenney,
+  CC0 1.0 (`Resources/LICENSE-Kenney-1BitPack.txt`). Credit not required; given with thanks.
+- Font: Press Start 2P (SIL Open Font License, `Resources/OFL-PressStart2P.txt`).

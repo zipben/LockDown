@@ -14,6 +14,7 @@ cp Support/Info.plist "$APP/Contents/Info.plist"
 cp "$BIN/LockDown" "$APP/Contents/MacOS/LockDown"
 cp "$BIN/lockdownd" "$APP/Contents/MacOS/lockdownd"
 cp Resources/PressStart2P-Regular.ttf Resources/OFL-PressStart2P.txt "$APP/Contents/Resources/"
+cp Resources/padlock-kenney-1bit.png Resources/LICENSE-Kenney-1BitPack.txt "$APP/Contents/Resources/"
 cp scripts/install.sh scripts/uninstall.sh "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/Resources/"*.sh
 

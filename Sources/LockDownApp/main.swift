@@ -32,7 +32,7 @@ struct LockDownApp: App {
     }
 }
 
-/// Writes an .iconset of the mascot for the build script to turn into AppIcon.icns.
+/// Writes an .iconset of the padlock logo for the build script to turn into AppIcon.icns.
 enum IconRenderer {
     @MainActor
     static func render(to dir: String) {
@@ -43,7 +43,7 @@ enum IconRenderer {
             let view = ZStack {
                 PixelRect(step: s / 16).fill(Pixel.bg)
                 PixelRect(step: s / 16).stroke(Pixel.yellow, lineWidth: max(1, s / 32)).padding(s / 64)
-                Sprites.mascot(s / 18)
+                Logo(pixel: (s * 0.6 / 16).rounded(.down))
             }
             .frame(width: s, height: s)
             let r = ImageRenderer(content: view)
