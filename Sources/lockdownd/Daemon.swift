@@ -96,8 +96,9 @@ final class Daemon {
 
     private func applyWeb(_ e: Enforcement) {
         if e.hasWebRules {
-            if let err = firewall.load() { health.lastError = err; Log.info(err) }
             systemDNS.redirect()
+            firewall.setVPNResolvers(systemDNS.unmanagedResolvers())
+            if let err = firewall.load() { health.lastError = err; Log.info(err) }
             systemDNS.flushCache()
             webActive = true
             if e.hardBlockIPs { refreshBlockedIPs(e) } else { firewall.setBlockedIPs([]) }
@@ -129,7 +130,10 @@ final class Daemon {
                 if ok {
                     if self.health.lastError?.hasPrefix("DNS self-test") == true { self.health.lastError = nil }
                 } else {
-                    self.health.lastError = "DNS self-test failed: lookups aren't reaching LockDown. A VPN's DNS (e.g. Tailscale) may be in the way."
+                    let vpn = self.firewall.vpnResolvers
+                    self.health.lastError = vpn.isEmpty
+                        ? "DNS self-test failed: lookups aren't reaching LockDown."
+                        : "Lookups go to a VPN's DNS (\(vpn.joined(separator: ", "))) instead of LockDown, so sites aren't blocked. Turn off \"Use Tailscale DNS\" (tailscale set --accept-dns=false) or your VPN's DNS setting."
                     Log.info("self-test probe \(name) never reached the DNS server")
                 }
             }
@@ -142,6 +146,7 @@ final class Daemon {
             Log.info("watchdog: DNS settings changed, re-redirecting")
             systemDNS.redirect()
         }
+        firewall.setVPNResolvers(systemDNS.unmanagedResolvers())
         if !firewall.verify() {
             Log.info("watchdog: firewall rules missing, reloading")
             if let err = firewall.load() { health.lastError = err }
@@ -155,6 +160,7 @@ final class Daemon {
         health.systemDNSRedirected = webActive && systemDNS.isRedirected()
         health.firewallLoaded = webActive && firewall.loaded
         health.upstreams = dns.currentUpstreams
+        health.vpnResolvers = webActive ? firewall.vpnResolvers : []
     }
 
     private func refreshUpstreams() {

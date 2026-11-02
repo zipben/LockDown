@@ -170,6 +170,14 @@ struct HealthPanel: View {
             if let ok = h.systemPathOK {
                 row("SELF-TEST LOOKUP", ok, "REACHED LOCKDOWN", "BYPASSED!")
             }
+            if !h.vpnResolvers.isEmpty {
+                HStack {
+                    Text("VPN DNS AHEAD OF LOCKDOWN").foregroundStyle(Pixel.inkDim)
+                    Spacer()
+                    Text(h.vpnResolvers.joined(separator: " ")).foregroundStyle(h.systemPathOK == false ? Pixel.red : Pixel.yellow)
+                }
+                .font(Pixel.font(8))
+            }
             HStack {
                 Text("UPSTREAM DNS").foregroundStyle(Pixel.inkDim)
                 Spacer()

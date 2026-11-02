@@ -13,24 +13,39 @@ final class Firewall {
     private var token: String?
     private(set) var loaded = false
 
-    /// IPv4 DNS sent to any other server (VPN resolvers like Tailscale's 100.100.100.100, routers,
-    /// hard-coded public DNS) is routed onto lo0 and redirected into LockDown's server, so it's
-    /// filtered instead of dropped. Dropping it broke every lookup whenever a VPN owned the primary
-    /// resolver. Replies are un-translated by pf state, so clients see their original server answer.
+    /// DNS to anything but LockDown is blocked, except to `<ld_vpn_dns>`: resolvers a VPN (e.g.
+    /// Tailscale's 100.100.100.100) installs ahead of ours, which networksetup can't override.
+    /// Blocking those broke every lookup. (Redirecting them with route-to/rdr was tried and pf
+    /// dropped the packets on this macOS.)
     func rules() -> String {
         """
         table <ld_doh> const { \(BypassGuards.dohIPs.joined(separator: ", ")) }
         table <ld_blocked> persist
-        rdr pass on lo0 inet proto { udp tcp } from any to ! 127.0.0.1 port 53 -> 127.0.0.1 port 53
+        table <ld_vpn_dns> persist\(vpnResolvers.isEmpty ? "" : " { " + vpnResolvers.joined(separator: ", ") + " }")
         pass quick on lo0 all
         pass out quick inet proto udp from any port \(Firewall.upstreamSourcePort) to any port 53 keep state
-        pass out quick on ! lo0 route-to lo0 inet proto { udp tcp } from any to any port 53 keep state
+        pass out quick proto { tcp udp } to <ld_vpn_dns> port 53 keep state
         block return out quick proto { tcp udp } to any port { 53 853 }
-        block drop in quick on ! lo0 proto { udp tcp } to any port 53
         block return out quick proto { tcp udp } to <ld_doh> port 443
         block return out quick to <ld_blocked>
 
         """
+    }
+
+    private(set) var vpnResolvers: [String] = []
+
+    /// Updates the allowed VPN resolvers; reloads only when the set changes.
+    func setVPNResolvers(_ ips: [String]) {
+        let sorted = Array(Set(ips)).sorted()
+        guard sorted != vpnResolvers else { return }
+        vpnResolvers = sorted
+        if loaded {
+            if sorted.isEmpty {
+                run(pfctl, ["-a", Firewall.anchor, "-t", "ld_vpn_dns", "-T", "flush"])
+            } else {
+                run(pfctl, ["-a", Firewall.anchor, "-t", "ld_vpn_dns", "-T", "replace", "-f", "-"], input: sorted.joined(separator: "\n"))
+            }
+        }
     }
 
     func load() -> String? {
@@ -127,6 +142,29 @@ final class SystemDNS {
             flushCache()
         }
         return changed
+    }
+
+    /// Non-loopback nameservers in the system's resolver list that we didn't set: resolvers a VPN
+    /// network extension installed (it owns them, so networksetup can't change them).
+    func unmanagedResolvers() -> [String] {
+        let out = run("/usr/sbin/scutil", ["--dns"]).out
+        // Only the main section; "for scoped queries" lists per-interface resolvers mDNSResponder
+        // uses only for interface-bound requests.
+        let main = out.components(separatedBy: "DNS configuration (for scoped queries)").first ?? out
+        var ips: [String] = []
+        // Each "resolver #N" block lists its nameservers, then (optionally) its interface. Only
+        // resolvers bound to tunnel interfaces belong to a VPN; the rest are ones we redirect.
+        for block in main.components(separatedBy: "resolver #").dropFirst() {
+            let lines = block.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let iface = lines.first(where: { $0.hasPrefix("if_index") })?.split(separator: "(").last?.dropLast(),
+                  ["utun", "ipsec", "ppp", "tun", "tap"].contains(where: { iface.hasPrefix($0) }) else { continue }
+            for line in lines where line.hasPrefix("nameserver[") {
+                guard let ip = line.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces),
+                      ip != "127.0.0.1", ip != "::1" else { continue }
+                ips.append(ip)
+            }
+        }
+        return Array(Set(ips)).sorted()
     }
 
     func isRedirected() -> Bool {

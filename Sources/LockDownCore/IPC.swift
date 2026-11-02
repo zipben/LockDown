@@ -72,6 +72,8 @@ public struct FilterHealth: Codable, Hashable {
     public var firewallLoaded = false
     /// nil = not tested yet; false = a lookup through the system resolver didn't reach LockDown.
     public var systemPathOK: Bool?
+    /// VPN-installed DNS servers that sit ahead of LockDown (allowed through so lookups keep working).
+    public var vpnResolvers: [String] = []
     public var upstreams: [String] = []
     public var lastError: String?
 
