@@ -81,7 +81,7 @@ struct StatusLine: View {
                     }
                 }
                 if let h = s?.health, active > 0 {
-                    let ok = h.dnsServerRunning && h.systemDNSRedirected && h.firewallLoaded
+                    let ok = h.dnsServerRunning && h.systemDNSRedirected && h.firewallLoaded && h.systemPathOK != false
                     Text(ok ? "SHIELD UP" : "SHIELD DOWN").font(Pixel.font(8)).foregroundStyle(ok ? Pixel.cyan : Pixel.red)
                 }
             }

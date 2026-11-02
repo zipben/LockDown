@@ -167,6 +167,9 @@ struct HealthPanel: View {
             row("DNS BLOCKER", h.dnsServerRunning, "RUNNING", "DOWN")
             row("SYSTEM DNS -> LOCKDOWN", h.systemDNSRedirected, "YES", webActive ? "NO" : "ONLY WHILE BLOCKING")
             row("FIREWALL RULES", h.firewallLoaded, "LOADED", webActive ? "MISSING" : "ONLY WHILE BLOCKING")
+            if let ok = h.systemPathOK {
+                row("SELF-TEST LOOKUP", ok, "REACHED LOCKDOWN", "BYPASSED!")
+            }
             HStack {
                 Text("UPSTREAM DNS").foregroundStyle(Pixel.inkDim)
                 Spacer()

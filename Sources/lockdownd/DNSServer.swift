@@ -26,6 +26,17 @@ final class DNSServer {
     /// Called (off the main state queue) with each blocked hostname.
     var onBlocked: ((String) -> Void)?
 
+    /// Self-test probe names that reached this server (see `Daemon.selfTest`).
+    static let probeSuffix = ".selftest.lockdown-probe.net"
+    private let probeLock = NSLock()
+    private var probesSeen = Set<String>()
+
+    func consumeProbe(_ name: String) -> Bool {
+        probeLock.lock()
+        defer { probeLock.unlock() }
+        return probesSeen.remove(name) != nil
+    }
+
     func setPolicies(_ p: [WebPolicy]) {
         policyLock.lock()
         policies = p.map(CompiledWebPolicy.init)
@@ -73,6 +84,13 @@ final class DNSServer {
 
     func handle(_ query: Data, reply: @escaping (Data) -> Void) {
         guard let q = DNSMessage.parseQuery(query) else { return }
+        if q.name.hasSuffix(DNSServer.probeSuffix) {
+            probeLock.lock()
+            probesSeen.insert(q.name)
+            probeLock.unlock()
+            reply(DNSMessage.blockedResponse(to: query, q))
+            return
+        }
         switch verdict(for: q.name) {
         case .nxdomain:
             reply(DNSMessage.nxdomain(to: query, q))

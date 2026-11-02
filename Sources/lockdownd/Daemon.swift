@@ -101,12 +101,39 @@ final class Daemon {
             systemDNS.flushCache()
             webActive = true
             if e.hardBlockIPs { refreshBlockedIPs(e) } else { firewall.setBlockedIPs([]) }
+            selfTest()
         } else if webActive {
             systemDNS.restore()
             firewall.unload()
             webActive = false
+            health.systemPathOK = nil
         }
         updateHealth()
+    }
+
+    /// Looks up a unique name through the normal system resolver (mDNSResponder) and checks that
+    /// it arrived at our DNS server. Catches resolvers we can't redirect, e.g. a VPN's own DNS.
+    private func selfTest() {
+        let name = "t\(UInt32.random(in: 0...UInt32.max))" + DNSServer.probeSuffix
+        let dns = self.dns
+        DispatchQueue.global().async {
+            var hints = addrinfo()
+            hints.ai_family = AF_INET
+            var res: UnsafeMutablePointer<addrinfo>?
+            _ = getaddrinfo(name, nil, &hints, &res)
+            if let res { freeaddrinfo(res) }
+            let ok = dns.consumeProbe(name)
+            self.queue.async {
+                guard self.webActive else { return }
+                self.health.systemPathOK = ok
+                if ok {
+                    if self.health.lastError?.hasPrefix("DNS self-test") == true { self.health.lastError = nil }
+                } else {
+                    self.health.lastError = "DNS self-test failed: lookups aren't reaching LockDown. A VPN's DNS (e.g. Tailscale) may be in the way."
+                    Log.info("self-test probe \(name) never reached the DNS server")
+                }
+            }
+        }
     }
 
     /// Re-asserts DNS redirection and firewall rules if something removed them.
@@ -120,6 +147,7 @@ final class Daemon {
             if let err = firewall.load() { health.lastError = err }
             if lastEnforcement.hardBlockIPs { refreshBlockedIPs(lastEnforcement) }
         }
+        if ticks % 30 == 0 { selfTest() }
         updateHealth()
     }
 

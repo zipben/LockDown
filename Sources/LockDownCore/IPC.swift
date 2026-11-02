@@ -70,6 +70,8 @@ public struct FilterHealth: Codable, Hashable {
     public var dnsServerRunning = false
     public var systemDNSRedirected = false
     public var firewallLoaded = false
+    /// nil = not tested yet; false = a lookup through the system resolver didn't reach LockDown.
+    public var systemPathOK: Bool?
     public var upstreams: [String] = []
     public var lastError: String?
 

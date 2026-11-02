@@ -13,13 +13,20 @@ final class Firewall {
     private var token: String?
     private(set) var loaded = false
 
+    /// IPv4 DNS sent to any other server (VPN resolvers like Tailscale's 100.100.100.100, routers,
+    /// hard-coded public DNS) is routed onto lo0 and redirected into LockDown's server, so it's
+    /// filtered instead of dropped. Dropping it broke every lookup whenever a VPN owned the primary
+    /// resolver. Replies are un-translated by pf state, so clients see their original server answer.
     func rules() -> String {
         """
         table <ld_doh> const { \(BypassGuards.dohIPs.joined(separator: ", ")) }
         table <ld_blocked> persist
+        rdr pass on lo0 inet proto { udp tcp } from any to ! 127.0.0.1 port 53 -> 127.0.0.1 port 53
         pass quick on lo0 all
-        pass out quick proto udp from any port \(Firewall.upstreamSourcePort) to any port 53 keep state
+        pass out quick inet proto udp from any port \(Firewall.upstreamSourcePort) to any port 53 keep state
+        pass out quick on ! lo0 route-to lo0 inet proto { udp tcp } from any to any port 53 keep state
         block return out quick proto { tcp udp } to any port { 53 853 }
+        block drop in quick on ! lo0 proto { udp tcp } to any port 53
         block return out quick proto { tcp udp } to <ld_doh> port 443
         block return out quick to <ld_blocked>
 
