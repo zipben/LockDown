@@ -63,6 +63,11 @@ final class Agent: NSObject, NSApplicationDelegate {
         if usageTick % 3 == 0 { reportUsage(seconds: 6) }
     }
 
+    /// LockDown's own processes are never blocked.
+    private func isOwn(_ bundleID: String?) -> Bool {
+        bundleID == "com.lockdown.app" || bundleID == "com.lockdown.agent"
+    }
+
     private func blockedName(_ bundleID: String) -> String? {
         if let a = enforcement.apps.first(where: { $0.bundleID == bundleID }) { return a.name }
         if enforcement.strictBundleIDs.contains(bundleID) { return "STRICT MODE" }
@@ -70,7 +75,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     private func check(_ app: NSRunningApplication) {
-        guard let id = app.bundleIdentifier, id != Bundle.main.bundleIdentifier, !app.isTerminated,
+        guard let id = app.bundleIdentifier, !isOwn(id), !app.isTerminated,
               blockedName(id) != nil else { return }
         let name = app.localizedName ?? id
         app.terminate()
@@ -86,7 +91,7 @@ final class Agent: NSObject, NSApplicationDelegate {
     /// permission to read other apps' window titles.
     private func checkTitles() {
         guard !enforcement.titleKeywords.isEmpty, let front = NSWorkspace.shared.frontmostApplication,
-              front.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+              !isOwn(front.bundleIdentifier) else { return }
         if !CGPreflightScreenCaptureAccess() {
             if !askedScreenCapture {
                 askedScreenCapture = true

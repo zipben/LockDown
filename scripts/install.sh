@@ -57,7 +57,7 @@ cat > "$AGENT_PLIST" <<EOF
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.lockdown.agent</string>
-  <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/LockDown</string><string>--agent</string></array>
+  <key>ProgramArguments</key><array><string>$APP/Contents/Library/LoginItems/LockDown Agent.app/Contents/MacOS/LockDown Agent</string><string>--agent</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>LimitLoadToSessionType</key><string>Aqua</string>

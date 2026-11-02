@@ -22,7 +22,21 @@ ICONSET="$(mktemp -d)/AppIcon.iconset"
 "$APP/Contents/MacOS/LockDown" --render-icon "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
+# The agent is a separate helper app with its own bundle ID. If it shared the main app's ID,
+# opening LockDown.app would just activate the windowless agent instead of showing the UI.
+AGENT="$APP/Contents/Library/LoginItems/LockDown Agent.app"
+mkdir -p "$AGENT/Contents/MacOS" "$AGENT/Contents/Resources"
+cp "$BIN/LockDown" "$AGENT/Contents/MacOS/LockDown Agent"
+cp Resources/PressStart2P-Regular.ttf "$APP/Contents/Resources/AppIcon.icns" "$AGENT/Contents/Resources/"
+cp Support/Info.plist "$AGENT/Contents/Info.plist"
+plutil -replace CFBundleIdentifier -string com.lockdown.agent "$AGENT/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string "LockDown Agent" "$AGENT/Contents/Info.plist"
+plutil -replace CFBundleName -string "LockDown Agent" "$AGENT/Contents/Info.plist"
+plutil -replace CFBundleDisplayName -string "LockDown Agent" "$AGENT/Contents/Info.plist"
+plutil -insert LSUIElement -bool true "$AGENT/Contents/Info.plist"
+
 codesign --force -s - --identifier com.lockdown.daemon "$APP/Contents/MacOS/lockdownd"
+codesign --force -s - "$AGENT"
 codesign --force -s - "$APP"
 
 echo "Built $APP"
