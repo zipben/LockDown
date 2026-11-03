@@ -54,3 +54,15 @@ Logs: `/var/log/lockdownd.log`. State: `/Library/Application Support/LockDown/`.
 - Logo: padlock tile from [1-Bit Pack](https://www.kenney.nl/assets/1-bit-pack) by Kenney,
   CC0 1.0 (`Resources/LICENSE-Kenney-1BitPack.txt`). Credit not required; given with thanks.
 - Font: Press Start 2P (SIL Open Font License, `Resources/OFL-PressStart2P.txt`).
+
+## Distributing
+
+`./scripts/package.sh` builds `dist/LockDown-<version>.dmg` (universal: Apple silicon + Intel,
+macOS 14+). It holds `Install LockDown.pkg`, `Uninstall LockDown.command` and a READ ME. Bump
+`CFBundleShortVersionString` in `Support/Info.plist` before each release.
+
+Without a paid Apple Developer account the package can't be signed or notarized, so macOS warns
+on first open. Recipients right-click the package and choose Open, or use System Settings >
+Privacy & Security > Open Anyway. The installer asks for an admin password, then its
+postinstall runs `install.sh` to set up the daemon and agent. Installing over an existing copy
+upgrades it in place and keeps blocks, locks and stats.

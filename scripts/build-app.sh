@@ -3,8 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)"
+# UNIVERSAL=1 builds for both Apple silicon and Intel (needs full Xcode).
+FLAGS=(-c release)
+[[ "${UNIVERSAL:-0}" == 1 ]] && FLAGS+=(--arch arm64 --arch x86_64)
+swift build "${FLAGS[@]}"
+BIN="$(swift build "${FLAGS[@]}" --show-bin-path)"
 
 APP="dist/LockDown.app"
 rm -rf "$APP"
