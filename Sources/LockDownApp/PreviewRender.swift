@@ -18,7 +18,13 @@ enum PreviewRender {
         let games = Block(name: "Games", apps: [AppRef(bundleID: "com.valvesoftware.steam", name: "Steam")], breakPolicy: .allowance(minutesPerDay: 30), lock: .timer)
         let frozen = Block(name: "Bedtime", kind: .frozen, frozenMode: .lockScreen)
         var stats = StatsSummary()
-        stats.blockedByDay = (0..<7).map { StatRow(key: "2026-10-\(27 + $0)", label: "10-\(27 + $0)", value: [12, 30, 8, 44, 21, 5, 17][$0]) }
+        let keyFmt = DateFormatter(), labelFmt = DateFormatter()
+        keyFmt.dateFormat = "yyyy-MM-dd"
+        labelFmt.dateFormat = "MM-dd"
+        stats.blockedByDay = (0..<7).map { i in
+            let day = Calendar.current.date(byAdding: .day, value: i - 6, to: now)!
+            return StatRow(key: keyFmt.string(from: day), label: labelFmt.string(from: day), value: [12, 30, 8, 44, 21, 5, 17][i])
+        }
         stats.blockedToday = [StatRow(key: "reddit.com", label: "reddit.com", value: 14), StatRow(key: "youtube.com", label: "youtube.com", value: 3)]
         stats.appsBlockedToday = [StatRow(key: "com.valvesoftware.steam", label: "Steam", value: 2)]
         stats.appTimeToday = [StatRow(key: "com.apple.dt.Xcode", label: "Xcode", value: 9000), StatRow(key: "com.apple.Safari", label: "Safari", value: 2400)]

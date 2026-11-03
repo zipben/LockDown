@@ -3,6 +3,24 @@
 An 8-bit-styled website and app blocker for macOS, built as a replacement for Cold Turkey.
 Blocking is system-wide, with no browser extensions and no paid Apple Developer account.
 
+## Screenshots
+
+A website and app block running on a real Mac:
+
+![A running block with its website and app lists](docs/screenshots/live-block.png)
+
+| Blocks: schedule, Pomodoro breaks, random-text lock | Hi-scores |
+|---|---|
+| ![Block editor with a weekly schedule](docs/screenshots/blocks.png) | ![Blocked attempts and screen time](docs/screenshots/stats.png) |
+
+| Frozen Turkey (random-text unlock) | Frozen Turkey (locked in) |
+|---|---|
+| ![Freeze screen asking for random text](docs/screenshots/frozen-random.png) | ![Freeze screen with no way out](docs/screenshots/frozen-timer.png) |
+
+![Options: text size, strict mode, network shield](docs/screenshots/live-options.png)
+
+All screenshots except the two live ones use sample data from `LockDown --render-preview <dir>`.
+
 ## How it works
 
 | Piece | Runs as | Job |
