@@ -108,7 +108,7 @@ final class Daemon {
             firewall.setVPNResolvers(systemDNS.unmanagedResolvers())
             if let err = firewall.load() { health.lastError = err; Log.info(err) }
             systemDNS.flushCache()
-            if !webActive { Log.info("web blocking on (vpn dns \(firewall.vpnResolvers), upstreams \(health.upstreams))") }
+            if !webActive { Log.info("web blocking on (vpn dns \(firewall.vpnResolvers), upstreams \(health.upstreams), encrypted dns \(enabledEncryptedDNSConfigs()))") }
             webActive = true
             if e.hardBlockIPs { refreshBlockedIPs(e) } else { firewall.setBlockedIPs([]) }
             selfTest()
@@ -141,10 +141,13 @@ final class Daemon {
                 guard self.webActive else { return }
                 self.health.systemPathOK = ok
                 if ok {
-                    if let e = self.health.lastError, e.hasPrefix("DNS self-test") || e.hasPrefix("Lookups go to") { self.health.lastError = nil }
+                    if let e = self.health.lastError, e.hasPrefix("DNS self-test") || e.hasPrefix("Lookups go to") || e.hasPrefix("Encrypted DNS") { self.health.lastError = nil }
                 } else {
                     let vpn = self.firewall.vpnResolvers
-                    self.health.lastError = vpn.isEmpty
+                    let encrypted = enabledEncryptedDNSConfigs()
+                    self.health.lastError = !encrypted.isEmpty
+                        ? "Encrypted DNS (\(encrypted.joined(separator: ", "))) is on, so lookups skip LockDown and sites aren't blocked. Turn it off in System Settings > Network > Filters."
+                        : vpn.isEmpty
                         ? "DNS self-test failed: lookups aren't reaching LockDown."
                         : "Lookups go to a VPN's DNS (\(vpn.joined(separator: ", "))) instead of LockDown, so sites aren't blocked. Turn off \"Use Tailscale DNS\" (tailscale set --accept-dns=false) or your VPN's DNS setting."
                     Log.info("self-test probe \(name) never reached the DNS server (getaddrinfo rc \(rc) after \(String(format: "%.1f", took))s, vpn dns \(vpn))")

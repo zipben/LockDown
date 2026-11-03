@@ -64,3 +64,29 @@ final class TailscaleDNS {
         Log.info("turned Tailscale DNS back on")
     }
 }
+
+/// Encrypted DNS (DoH/DoT) configured through NEDNSSettings, e.g. a NextDNS profile, outranks the
+/// DNS servers LockDown sets, so lookups skip LockDown. Returns the names of enabled ones.
+func enabledEncryptedDNSConfigs() -> [String] {
+    guard let data = FileManager.default.contents(atPath: "/Library/Preferences/com.apple.networkextension.plist"),
+          let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+          let objects = plist["$objects"] as? [Any] else { return [] }
+    func resolve(_ v: Any?) -> Any? {
+        // Archived references bridge to CFKeyedArchiverUID; read its index from the description.
+        guard let v else { return nil }
+        let d = "\(v)"
+        if d.contains("CFKeyedArchiverUID"), let r = d.range(of: "value = "),
+           let n = Int(d[r.upperBound...].prefix { $0.isNumber }), n < objects.count { return objects[n] }
+        return v
+    }
+    func className(_ o: [String: Any]) -> String? {
+        (resolve(o["$class"]) as? [String: Any])?["$classname"] as? String
+    }
+    var names: [String] = []
+    for case let o as [String: Any] in objects where className(o) == "NEConfiguration" {
+        guard let dns = resolve(o["DNSSettings"]) as? [String: Any], className(dns) == "NEDNSSettingsBundle",
+              (dns["Enabled"] as? Bool) == true else { continue }
+        names.append((resolve(o["Name"]) as? String) ?? (resolve(o["ApplicationName"]) as? String) ?? "encrypted DNS")
+    }
+    return names
+}
