@@ -10,6 +10,8 @@ fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC_APP="${1:-$(cd "$HERE/../.." && pwd)}"
+# Run from the repo's scripts/ rather than from inside the bundle: use the built app.
+case "$SRC_APP" in *.app) ;; *) SRC_APP="$(cd "$HERE/.." && pwd)/dist/LockDown.app" ;; esac
 APP="/Applications/LockDown.app"
 HELPER="/Library/PrivilegedHelperTools/com.lockdown.daemon"
 DAEMON_PLIST="/Library/LaunchDaemons/com.lockdown.daemon.plist"
