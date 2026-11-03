@@ -100,10 +100,12 @@ final class Daemon {
             firewall.setVPNResolvers(systemDNS.unmanagedResolvers())
             if let err = firewall.load() { health.lastError = err; Log.info(err) }
             systemDNS.flushCache()
+            if !webActive { Log.info("web blocking on (vpn dns \(firewall.vpnResolvers), upstreams \(health.upstreams))") }
             webActive = true
             if e.hardBlockIPs { refreshBlockedIPs(e) } else { firewall.setBlockedIPs([]) }
             selfTest()
         } else if webActive {
+            Log.info("web blocking off")
             systemDNS.restore()
             firewall.unload()
             webActive = false
@@ -121,20 +123,22 @@ final class Daemon {
             var hints = addrinfo()
             hints.ai_family = AF_INET
             var res: UnsafeMutablePointer<addrinfo>?
-            _ = getaddrinfo(name, nil, &hints, &res)
+            let started = Date()
+            let rc = getaddrinfo(name, nil, &hints, &res)
+            let took = Date().timeIntervalSince(started)
             if let res { freeaddrinfo(res) }
             let ok = dns.consumeProbe(name)
             self.queue.async {
                 guard self.webActive else { return }
                 self.health.systemPathOK = ok
                 if ok {
-                    if self.health.lastError?.hasPrefix("DNS self-test") == true { self.health.lastError = nil }
+                    if let e = self.health.lastError, e.hasPrefix("DNS self-test") || e.hasPrefix("Lookups go to") { self.health.lastError = nil }
                 } else {
                     let vpn = self.firewall.vpnResolvers
                     self.health.lastError = vpn.isEmpty
                         ? "DNS self-test failed: lookups aren't reaching LockDown."
                         : "Lookups go to a VPN's DNS (\(vpn.joined(separator: ", "))) instead of LockDown, so sites aren't blocked. Turn off \"Use Tailscale DNS\" (tailscale set --accept-dns=false) or your VPN's DNS setting."
-                    Log.info("self-test probe \(name) never reached the DNS server")
+                    Log.info("self-test probe \(name) never reached the DNS server (getaddrinfo rc \(rc) after \(String(format: "%.1f", took))s, vpn dns \(vpn))")
                 }
             }
         }

@@ -2,7 +2,12 @@ import Foundation
 import LockDownCore
 
 enum Log {
-    static func info(_ s: String) { FileHandle.standardError.write(Data("[lockdownd] \(s)\n".utf8)) }
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f
+    }()
+    static func info(_ s: String) {
+        FileHandle.standardError.write(Data("\(stamp.string(from: Date())) [lockdownd] \(s)\n".utf8))
+    }
 }
 
 struct ShellResult {
