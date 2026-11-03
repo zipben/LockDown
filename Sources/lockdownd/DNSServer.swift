@@ -43,6 +43,22 @@ final class DNSServer {
         policyLock.unlock()
     }
 
+    /// Name suffix -> resolver, e.g. "ts.net" -> Tailscale's 100.100.100.100.
+    private var splitRoutes: [String: String] = [:]
+
+    func setSplitRoutes(_ r: [String: String]) {
+        policyLock.lock()
+        splitRoutes = r
+        policyLock.unlock()
+    }
+
+    private func splitRoute(for name: String) -> String? {
+        policyLock.lock()
+        defer { policyLock.unlock() }
+        let n = name.lowercased()
+        return splitRoutes.first { n == $0.key || n.hasSuffix("." + $0.key) }?.value
+    }
+
     func setUpstreams(_ u: [String]) {
         policyLock.lock()
         upstreams = Array(u.prefix(3))
@@ -105,7 +121,7 @@ final class DNSServer {
     // MARK: Forwarding
 
     func forward(_ query: Data, _ q: DNSMessage.Question, reply: @escaping (Data) -> Void) {
-        let targets = currentUpstreams
+        let targets = splitRoute(for: q.name).map { [$0] } ?? currentUpstreams
         guard !targets.isEmpty else {
             reply(DNSMessage.servfail(to: query, q))
             return

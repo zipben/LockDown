@@ -15,6 +15,7 @@ final class Daemon {
     let dns = DNSServer()
     let firewall = Firewall()
     let systemDNS = SystemDNS()
+    let tailscale = TailscaleDNS()
 
     private var lastEnforcement = Enforcement()
     private var webActive = false
@@ -65,6 +66,7 @@ final class Daemon {
                 return
             }
             if webActive {
+                tailscale.resume()
                 systemDNS.restore()
                 firewall.unload()
             }
@@ -89,6 +91,8 @@ final class Daemon {
         }
         if webActive && e.hardBlockIPs && ticks % 150 == 1 { refreshBlockedIPs(e) }
         if ticks % 15 == 0 { refreshUpstreams() }
+        // Restores Tailscale DNS left off by a crash or an earlier failed attempt.
+        if !webActive && tailscale.suspended && ticks % 15 == 0 { tailscale.resume() }
         if ticks % 1800 == 0 { clock.syncNTP() }
         lastEnforcement = e
         persist(force: false)
@@ -96,6 +100,10 @@ final class Daemon {
 
     private func applyWeb(_ e: Enforcement) {
         if e.hasWebRules {
+            if tailscale.installed {
+                dns.setSplitRoutes(TailscaleDNS.routes)
+                tailscale.suspend()
+            }
             systemDNS.redirect()
             firewall.setVPNResolvers(systemDNS.unmanagedResolvers())
             if let err = firewall.load() { health.lastError = err; Log.info(err) }
@@ -106,6 +114,7 @@ final class Daemon {
             selfTest()
         } else if webActive {
             Log.info("web blocking off")
+            tailscale.resume()
             systemDNS.restore()
             firewall.unload()
             webActive = false
@@ -150,6 +159,7 @@ final class Daemon {
             Log.info("watchdog: DNS settings changed, re-redirecting")
             systemDNS.redirect()
         }
+        if tailscale.installed && tailscale.suspend() { systemDNS.flushCache() }
         firewall.setVPNResolvers(systemDNS.unmanagedResolvers())
         if !firewall.verify() {
             Log.info("watchdog: firewall rules missing, reloading")

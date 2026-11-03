@@ -17,7 +17,7 @@ struct ShellResult {
 }
 
 @discardableResult
-func run(_ path: String, _ args: [String], input: String? = nil) -> ShellResult {
+func run(_ path: String, _ args: [String], input: String? = nil, timeout: TimeInterval? = nil) -> ShellResult {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
@@ -27,6 +27,9 @@ func run(_ path: String, _ args: [String], input: String? = nil) -> ShellResult 
     let inPipe = Pipe()
     p.standardInput = input == nil ? FileHandle.nullDevice : inPipe
     do { try p.run() } catch { return ShellResult(status: -1, out: "", err: "\(error)") }
+    if let timeout {
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { if p.isRunning { p.terminate() } }
+    }
     if let input {
         inPipe.fileHandleForWriting.write(Data(input.utf8))
         try? inPipe.fileHandleForWriting.close()
@@ -43,6 +46,7 @@ enum Paths {
     static let stats = support + "/stats.json"
     static let dnsRestore = support + "/dns-restore.json"
     static let pfRules = support + "/pf.rules"
+    static let tailscaleRestore = support + "/tailscale-dns-suspended"
 }
 
 func writeAtomically(_ data: Data, to path: String, mode: Int16 = 0o600) {
