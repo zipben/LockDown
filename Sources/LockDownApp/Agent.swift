@@ -4,7 +4,7 @@ import SwiftUI
 import UserNotifications
 
 /// Runs in the user's session (launched with --agent by a LaunchAgent). Quits blocked apps,
-/// hides windows with blocked titles, shows the Frozen Turkey screen, and reports usage.
+/// hides windows with blocked titles, shows the freeze screen, and reports usage.
 @MainActor
 final class Agent: NSObject, NSApplicationDelegate {
     private var enforcement = Enforcement()
@@ -132,7 +132,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
-    // MARK: Frozen Turkey
+    // MARK: Freeze
 
     private func updateFrozen() {
         guard let f = enforcement.frozen else {

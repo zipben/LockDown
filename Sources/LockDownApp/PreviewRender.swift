@@ -39,7 +39,14 @@ enum PreviewRender {
             BlockStatus(block: frozen, activity: .idle, locked: false, lockReason: "", allowanceRemaining: nil),
         ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: true)
 
-        let tabs: [(String, Tab, Snapshot?)] = [("blocks", .blocks, snap), ("stats", .stats, snap), ("options", .settings, snap), ("insert-coin", .blocks, nil)]
+        let focus = Block(name: "Focus Time", websites: ["reddit.com", "news.ycombinator.com", "x.com", "*tube*"], websiteExceptions: ["docs.python.org"],
+                          apps: [AppRef(bundleID: "com.valvesoftware.steam", name: "Steam"), AppRef(bundleID: "com.tinyspeck.slackmacgap", name: "Slack")],
+                          lock: .randomText(length: 60))
+        let running = Snapshot(now: now, blocks: [
+            BlockStatus(block: focus, activity: Activity(source: .timer, enforcing: true, endsAt: now.addingTimeInterval(3600)), locked: true, lockReason: "", allowanceRemaining: nil),
+        ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: true)
+
+        let tabs: [(String, Tab, Snapshot?)] = [("blocks", .blocks, snap), ("running", .blocks, running), ("stats", .stats, snap), ("options", .settings, snap), ("insert-coin", .blocks, nil)]
         for (name, tab, s) in tabs {
             let store = Store(preview: s)
             let root = ContentView(initialTab: tab).environmentObject(store)

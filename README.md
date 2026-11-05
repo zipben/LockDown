@@ -5,28 +5,28 @@ Blocking is system-wide, with no browser extensions and no paid Apple Developer 
 
 ## Screenshots
 
-A website and app block running on a real Mac:
+A website and app block running:
 
-![A running block with its website and app lists](docs/screenshots/live-block.png)
+![A running block with its website and app lists](docs/screenshots/running.png)
 
 | Blocks: schedule, Pomodoro breaks, random-text lock | Hi-scores |
 |---|---|
 | ![Block editor with a weekly schedule](docs/screenshots/blocks.png) | ![Blocked attempts and screen time](docs/screenshots/stats.png) |
 
-| Frozen Turkey (random-text unlock) | Frozen Turkey (locked in) |
+| Freeze (random-text unlock) | Freeze (locked in) |
 |---|---|
 | ![Freeze screen asking for random text](docs/screenshots/frozen-random.png) | ![Freeze screen with no way out](docs/screenshots/frozen-timer.png) |
 
 ![Options: text size, strict mode, network shield](docs/screenshots/live-options.png)
 
-All screenshots except the two live ones use sample data from `LockDown --render-preview <dir>`.
+All screenshots except Options use sample data from `LockDown --render-preview <dir>`.
 
 ## How it works
 
 | Piece | Runs as | Job |
 |---|---|---|
 | `lockdownd` | root (LaunchDaemon) | Owns blocks and lock state, runs a DNS blocker on `127.0.0.1:53`, loads pf firewall rules, re-applies them if removed |
-| `LockDown --agent` | you (LaunchAgent) | Quits blocked apps, hides windows by title, shows the Frozen Turkey screen, reports screen time |
+| `LockDown --agent` | you (LaunchAgent) | Quits blocked apps, hides windows by title, shows the freeze screen, reports screen time |
 | `LockDown.app` | you | The UI; talks to the daemon over `/var/run/lockdownd.sock` |
 
 **Web blocking.** While a block with websites is running, every network service's DNS points at
@@ -45,7 +45,7 @@ is stopped while a locked web block runs, it leaves DNS redirected (fails closed
 
 **When a block runs.** Each block runs one of two ways: when you start it, or by itself at the hours painted on its weekly schedule. A scheduled block can't be started by hand.
 
-**Frozen Turkey.** Full-screen lock, log out, or shut down for the duration. A freeze survives reboots, so there's an emergency exit in case the freeze screen ever breaks: restarting 3 times in a row (each within 10 minutes of the last boot) ends any running freeze, whatever its lock. Other blocks keep running.
+**Freeze.** Full-screen lock, log out, or shut down for the duration. A freeze survives reboots, so there's an emergency exit in case the freeze screen ever breaks: restarting 3 times in a row (each within 10 minutes of the last boot) ends any running freeze, whatever its lock. Other blocks keep running.
 
 ## Limits
 
@@ -86,3 +86,7 @@ on first open. Recipients right-click the package and choose Open, or use System
 Privacy & Security > Open Anyway. The installer asks for an admin password, then its
 postinstall runs `install.sh` to set up the daemon and agent. Installing over an existing copy
 upgrades it in place and keeps blocks, locks and stats.
+
+## License
+
+MIT. See `LICENSE`. The font and logo keep their own licenses, listed under Credits.

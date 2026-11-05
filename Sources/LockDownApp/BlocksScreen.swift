@@ -63,7 +63,7 @@ struct BlockList: View {
             HStack(spacing: 10) {
                 Button("+ BLOCK") { newDraft = Block(name: "NEW BLOCK") }
                     .buttonStyle(PixelButtonStyle(size: 9))
-                Button("+ FROZEN") { newDraft = Block(name: "FROZEN TURKEY", kind: .frozen) }
+                Button("+ FREEZE") { newDraft = Block(name: "FREEZE", kind: .frozen) }
                     .buttonStyle(PixelButtonStyle(color: Pixel.ice, size: 9))
             }
             .padding(.bottom, 16)
@@ -283,7 +283,7 @@ struct BlockEditor: View {
     }
 
     var frozenPanel: some View {
-        PixelPanel(title: "FROZEN TURKEY", accent: Pixel.ice) {
+        PixelPanel(title: "FREEZE", accent: Pixel.ice) {
             HStack(spacing: 12) {
                 Sprites.snowflake(4)
                 Text("Locks the whole computer while active.")
