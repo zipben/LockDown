@@ -106,7 +106,8 @@ struct BlockRow: View {
             if let e = a.endsAt { return "ON \(clockString(Int(e.timeIntervalSince(now))))" }
             return "ON - NO END"
         }
-        return status.block.scheduleEnabled ? "SCHEDULED" : "IDLE"
+        guard status.block.scheduleEnabled else { return "IDLE" }
+        return nextRunLabel(status.block, now: now).map { "NEXT \($0)" } ?? "NO HOURS SET"
     }
 
     func color(_ a: Activity) -> Color {
@@ -146,11 +147,11 @@ struct BlockEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    RunModePanel(block: $draft, status: status, dirty: dirty) { showStart = true }
                     if draft.kind == .frozen { frozenPanel } else {
                         websitesPanel
                         appsPanel
                     }
-                    SchedulePanel(block: $draft)
                     if draft.kind == .standard { breaksPanel }
                     lockPanel
                     footer
@@ -212,10 +213,6 @@ struct BlockEditor: View {
                 Button("UNLOCK") { showUnlock = true }
                     .buttonStyle(PixelButtonStyle(color: Pixel.yellow, size: 9))
             }
-            Button(s.activity.source == .timer ? "EXTEND" : "START") { showStart = true }
-                .buttonStyle(PixelButtonStyle(color: Pixel.green, size: 9))
-                .disabled(dirty)
-                .help(dirty ? "Save changes first" : "Start a timed run")
             if s.activity.running {
                 Button("STOP") { store.send(Request(.stopBlock, blockID: s.id)) }
                     .buttonStyle(PixelButtonStyle(color: Pixel.red, size: 9))
@@ -449,7 +446,8 @@ struct ActivityBadge: View {
                 Text(a.endsAt.map { "BLOCKING - \(clockString(Int($0.timeIntervalSince(now)))) LEFT" } ?? "BLOCKING - UNTIL STOPPED")
                     .foregroundStyle(Pixel.green)
             } else {
-                Text(status.block.scheduleEnabled ? "WAITING FOR SCHEDULE" : "IDLE").foregroundStyle(Pixel.inkMuted)
+                Text(status.block.scheduleEnabled ? nextRunLabel(status.block, now: now).map { "NEXT RUN \($0)" } ?? "NO HOURS SET" : "IDLE")
+                    .foregroundStyle(Pixel.inkMuted)
             }
             if let next = a.nextBreakAt {
                 Text("NEXT BREAK \(clockString(Int(next.timeIntervalSince(now))))").foregroundStyle(Pixel.inkDim)

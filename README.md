@@ -43,7 +43,9 @@ is stopped while a locked web block runs, it leaves DNS redirected (fails closed
 
 **Breaks.** Pomodoro cycles, or a daily allowance spent on demand.
 
-**Frozen Turkey.** Full-screen lock, log out, or shut down for the duration.
+**When a block runs.** Each block runs one of two ways: when you start it, or by itself at the hours painted on its weekly schedule. A scheduled block can't be started by hand.
+
+**Frozen Turkey.** Full-screen lock, log out, or shut down for the duration. A freeze survives reboots, so there's an emergency exit in case the freeze screen ever breaks: restarting 3 times in a row (each within 10 minutes of the last boot) ends any running freeze, whatever its lock. Other blocks keep running.
 
 ## Limits
 

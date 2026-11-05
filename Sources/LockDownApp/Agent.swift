@@ -146,7 +146,8 @@ final class Agent: NSObject, NSApplicationDelegate {
         frozenModel.mode = f.mode
         frozenModel.lock = f.lock
         frozenModel.locked = f.locked
-        frozenModel.skew = daemonSkew
+        // The measured skew wobbles with each poll; ignore that so the countdown can't jump.
+        if abs(daemonSkew - frozenModel.skew) > 1 { frozenModel.skew = daemonSkew }
         if frozenWindows.isEmpty { freeze() }
         reassertFrozen()
 
@@ -156,7 +157,7 @@ final class Agent: NSObject, NSApplicationDelegate {
             let event = f.mode == .logout ? "«event aevtrlgo»" : "«event aevtrsdn»"
             NSAppleScript(source: "tell application \"loginwindow\" to \(event)")?.executeAndReturnError(nil)
         }
-        frozenModel.actionCountdown = f.mode == .lockScreen ? nil : max(0, 20 - Int(Date().timeIntervalSince(frozenStartedAt ?? Date())))
+        frozenModel.actionAt = f.mode == .lockScreen ? nil : frozenStartedAt?.addingTimeInterval(20)
     }
 
     private func freeze() {
@@ -184,7 +185,11 @@ final class Agent: NSObject, NSApplicationDelegate {
             w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
             w.isOpaque = true
             w.backgroundColor = .black
-            w.contentView = NSHostingView(rootView: FrozenView(model: frozenModel))
+            let host = NSHostingView(rootView: FrozenView(model: frozenModel))
+            // The window must always match the screen. By default the hosting view resizes it to
+            // fit the content, which can push everything below the bottom edge.
+            host.sizingOptions = []
+            w.contentView = host
             w.setFrame(screen.frame, display: true)
             w.makeKeyAndOrderFront(nil)
             frozenWindows.append(w)
@@ -220,13 +225,14 @@ final class FrozenModel: ObservableObject {
     @Published var blockName = ""
     @Published var endsAt: Date?
     @Published var mode: FrozenMode = .lockScreen
-    @Published var actionCountdown: Int?
+    /// When a log out or shut down fires.
+    @Published var actionAt: Date?
     @Published var blockID: UUID?
     @Published var lock: LockPolicy = .none
     @Published var locked = false
     @Published var challenge: String?
     @Published var message: String?
-    var skew: TimeInterval = 0
+    @Published var skew: TimeInterval = 0
     var send: (Request) -> Void = { _ in }
 
     func reset() {
@@ -235,36 +241,62 @@ final class FrozenModel: ObservableObject {
     }
 }
 
+/// Whole seconds until `end`. Keeps its own clock because every model update redraws the freeze
+/// screen, and a timer created in a redrawn body starts over, so it missed ticks.
+struct Countdown<Content: View>: View {
+    let end: Date
+    var skew: TimeInterval = 0
+    @ViewBuilder let content: (Int) -> Content
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+            content(max(0, Int(end.timeIntervalSince(Date().addingTimeInterval(skew)).rounded(.up))))
+        }
+    }
+}
+
 struct FrozenView: View {
     @ObservedObject var model: FrozenModel
-    @State private var tick = Date()
 
     var body: some View {
         ZStack {
             Pixel.bg.ignoresSafeArea()
-            VStack(spacing: 30) {
-                Sprites.snowflake(14)
-                Text("FROZEN").font(Pixel.font(48)).foregroundStyle(Pixel.ice)
-                    .shadow(color: Pixel.cyan, radius: 0, x: 5, y: 5)
-                Text(model.blockName.uppercased()).font(Pixel.font(14)).foregroundStyle(Pixel.inkDim)
-                if let end = model.endsAt {
-                    Text(clockString(Int(end.timeIntervalSince(tick.addingTimeInterval(model.skew)))))
-                        .font(Pixel.font(36)).foregroundStyle(Pixel.yellow)
-                } else {
-                    Text("UNTIL UNLOCKED").font(Pixel.font(20)).foregroundStyle(Pixel.yellow)
+            GeometryReader { geo in
+                ScrollView {
+                    content.frame(maxWidth: .infinity, minHeight: geo.size.height)
                 }
-                if let c = model.actionCountdown {
-                    Text(model.mode == .logout ? "LOGGING OUT IN \(c)" : "SHUTTING DOWN IN \(c)")
-                        .font(Pixel.font(14)).foregroundStyle(Pixel.red).blinking()
-                } else {
-                    Text("GO OUTSIDE. SEE YOU SOON.").font(Pixel.font(12)).foregroundStyle(Pixel.inkDim).blinking(0.8)
-                }
-                FrozenEscape(model: model)
-                    .padding(.top, 10)
+                .scrollIndicators(.hidden)
             }
             Scanlines()
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick = $0 }
+    }
+
+    private var content: some View {
+        VStack(spacing: 30) {
+            Sprites.snowflake(14)
+            Text("FROZEN").font(Pixel.font(48)).foregroundStyle(Pixel.ice)
+                .shadow(color: Pixel.cyan, radius: 0, x: 5, y: 5)
+            Text(model.blockName.uppercased()).font(Pixel.font(14)).foregroundStyle(Pixel.inkDim)
+            if let end = model.endsAt {
+                Countdown(end: end, skew: model.skew) { s in
+                    Text(clockString(s)).font(Pixel.font(36)).foregroundStyle(Pixel.yellow)
+                }
+            } else {
+                Text("UNTIL UNLOCKED").font(Pixel.font(20)).foregroundStyle(Pixel.yellow)
+            }
+            if let at = model.actionAt {
+                Countdown(end: at) { c in
+                    Text(model.mode == .logout ? "LOGGING OUT IN \(c)" : "SHUTTING DOWN IN \(c)")
+                        .font(Pixel.font(14)).foregroundStyle(Pixel.red)
+                }
+                .blinking()
+            } else {
+                Text("GO OUTSIDE. SEE YOU SOON.").font(Pixel.font(12)).foregroundStyle(Pixel.inkDim).blinking(0.8)
+            }
+            FrozenEscape(model: model)
+                .padding(.top, 10)
+        }
+        .padding(.vertical, 24)
     }
 }
 
@@ -274,6 +306,7 @@ struct FrozenEscape: View {
     @ObservedObject var model: FrozenModel
     @State private var typed = ""
     @State private var password = ""
+    @FocusState private var typing: Bool
 
     var body: some View {
         VStack(spacing: 16) {
@@ -300,11 +333,13 @@ struct FrozenEscape: View {
                 VStack(spacing: 10) {
                     Text("TYPE THIS EXACTLY:").font(Pixel.font(8)).foregroundStyle(Pixel.inkDim)
                     Text(c).font(Pixel.mono(16, weight: .bold)).foregroundStyle(Pixel.ink)
-                        .frame(maxWidth: 640).fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 640, alignment: .leading)
                     TextField("", text: $typed)
                         .textFieldStyle(.plain)
                         .font(Pixel.mono(16))
-                        .padding(8).frame(maxWidth: 640)
+                        .focused($typing)
+                        .onAppear { typing = true }
+                        .padding(8).frame(width: 640)
                         .background(Pixel.panel).overlay(Rectangle().stroke(Pixel.panelHi, lineWidth: 2))
                         .onChange(of: typed) { old, new in
                             if new.count > old.count + 1 { typed = old; model.message = "No pasting! Type it." }

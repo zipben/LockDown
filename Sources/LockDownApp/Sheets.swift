@@ -188,28 +188,76 @@ struct UnlockSheet: View {
 
 // MARK: - Schedule
 
-struct SchedulePanel: View {
+/// "NEXT RUN" text for a scheduled block; nil when nothing is painted.
+func nextRunLabel(_ block: Block, now: Date) -> String? {
+    guard let next = LockEngine().nextScheduleStart(block.schedule, after: now) else { return nil }
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US")
+    f.dateFormat = "EEE h:mm a"
+    return f.string(from: next).uppercased()
+}
+
+/// A block runs one of two ways: when you start it, or by itself on a schedule.
+struct RunModePanel: View {
+    @EnvironmentObject var store: Store
     @Binding var block: Block
+    let status: BlockStatus?
+    let dirty: Bool
+    let start: () -> Void
 
     var body: some View {
-        PixelPanel(title: "SCHEDULE", accent: Pixel.magenta) {
-            PixelToggle(label: "RUN ON A WEEKLY SCHEDULE", isOn: $block.scheduleEnabled)
-            if block.scheduleEnabled {
-                ScheduleGrid(ranges: $block.schedule)
-                HStack(spacing: 8) {
-                    PixelChip(label: "WORKDAYS 9-5", selected: false, color: Pixel.magenta) {
-                        block.schedule = (2...6).map { ScheduleRange(weekday: $0, startMinute: 540, endMinute: 1020) }
-                    }
-                    PixelChip(label: "EVERY NIGHT 10-7", selected: false, color: Pixel.magenta) {
-                        block.schedule = (1...7).flatMap {
-                            [ScheduleRange(weekday: $0, startMinute: 1320, endMinute: 1440), ScheduleRange(weekday: $0, startMinute: 0, endMinute: 420)]
-                        }
-                    }
-                    PixelChip(label: "CLEAR", selected: false, color: Pixel.magenta) { block.schedule = [] }
-                }
-                Text("Click or drag to paint half-hour cells.").font(Pixel.font(7)).foregroundStyle(Pixel.inkMuted)
+        PixelPanel(title: "WHEN IT RUNS", accent: Pixel.magenta) {
+            HStack(spacing: 8) {
+                PixelChip(label: "WHEN I START IT", selected: !block.scheduleEnabled, color: Pixel.magenta) { block.scheduleEnabled = false }
+                PixelChip(label: "ON A SCHEDULE", selected: block.scheduleEnabled, color: Pixel.magenta) { block.scheduleEnabled = true }
             }
+            if !block.scheduleEnabled {
+                manual
+            } else {
+                scheduled
+            }
+            // Switching to a schedule doesn't cancel a run you already started.
+            if block.scheduleEnabled, !dirty, status?.activity.source == .timer { startButton }
         }
+    }
+
+    var startButton: some View {
+        Button(status?.activity.source == .timer ? "EXTEND" : "START NOW", action: start)
+            .buttonStyle(PixelButtonStyle(color: Pixel.green, size: 9))
+            .disabled(dirty || status == nil)
+    }
+
+    var manual: some View {
+        HStack(spacing: 14) {
+            startButton
+            Text(dirty || status == nil ? "SAVE FIRST, THEN START IT." : "RUNS ONLY WHEN YOU START IT.")
+                .font(Pixel.font(7)).foregroundStyle(Pixel.inkDim)
+        }
+    }
+
+    var scheduleNote: String {
+        if block.schedule.isEmpty { return "PAINT SOME HOURS OR THIS BLOCK WILL NEVER RUN." }
+        if dirty || status == nil { return "SAVE TO TURN THIS SCHEDULE ON." }
+        if status?.activity.source == .schedule { return "RUNNING NOW. TURNS ITSELF OFF AND ON AT THESE TIMES." }
+        return nextRunLabel(block, now: store.daemonNow).map { "TURNS ITSELF ON. NEXT RUN: \($0)" } ?? ""
+    }
+
+    @ViewBuilder
+    var scheduled: some View {
+        Text(scheduleNote).font(Pixel.font(7)).foregroundStyle(Pixel.yellow)
+        ScheduleGrid(ranges: $block.schedule)
+        HStack(spacing: 8) {
+            PixelChip(label: "WORKDAYS 9-5", selected: false, color: Pixel.magenta) {
+                block.schedule = (2...6).map { ScheduleRange(weekday: $0, startMinute: 540, endMinute: 1020) }
+            }
+            PixelChip(label: "EVERY NIGHT 10-7", selected: false, color: Pixel.magenta) {
+                block.schedule = (1...7).flatMap {
+                    [ScheduleRange(weekday: $0, startMinute: 1320, endMinute: 1440), ScheduleRange(weekday: $0, startMinute: 0, endMinute: 420)]
+                }
+            }
+            PixelChip(label: "CLEAR", selected: false, color: Pixel.magenta) { block.schedule = [] }
+        }
+        Text("Click or drag to paint half-hour cells.").font(Pixel.font(7)).foregroundStyle(Pixel.inkMuted)
     }
 }
 
@@ -222,18 +270,28 @@ struct ScheduleGrid: View {
     static let rowNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
     var labelWidth: CGFloat { Pixel.ui(36) }
     var cellH: CGFloat { Pixel.ui(14) }
+    var headerH: CGFloat { Pixel.ui(32) }
+
+    static func hourLabel(_ hour: Int) -> String { "\(hour % 12 == 0 ? 12 : hour % 12)" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 0) {
                 Spacer().frame(width: labelWidth)
                 GeometryReader { g in
-                    ForEach([0, 6, 12, 18], id: \.self) { h in
-                        Text("\(h)").font(Pixel.font(7)).foregroundStyle(Pixel.inkMuted)
-                            .position(x: g.size.width * CGFloat(h) / 24 + 6, y: 6)
+                    let hourW = g.size.width / 24
+                    ForEach(0..<24, id: \.self) { h in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(h == 0 ? "AM" : h == 12 ? "PM" : " ").foregroundStyle(Pixel.magenta)
+                            Text(Self.hourLabel(h)).foregroundStyle(Pixel.inkDim)
+                        }
+                        .font(Pixel.font(7))
+                        .fixedSize()
+                        .frame(width: hourW, alignment: .leading)
+                        .position(x: hourW * (CGFloat(h) + 0.5), y: headerH / 2)
                     }
                 }
-                .frame(height: 12)
+                .frame(height: headerH)
             }
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
@@ -247,9 +305,10 @@ struct ScheduleGrid: View {
                     Canvas { ctx, _ in
                         for row in 0..<7 {
                             for col in 0..<48 {
-                                let r = CGRect(x: CGFloat(col) * cw, y: CGFloat(row) * cellH, width: cw - 1, height: cellH - 1)
+                                // A wider gap on the hour lines the cells up with the labels above.
+                                let r = CGRect(x: CGFloat(col) * cw, y: CGFloat(row) * cellH, width: cw - (col % 2 == 1 ? 2 : 1), height: cellH - 1)
                                 let on = cells.contains(Cell(row: row, col: col))
-                                ctx.fill(Path(r), with: .color(on ? Pixel.magenta : (col % 2 == 0 ? Pixel.bg : Pixel.panel.opacity(0.7))))
+                                ctx.fill(Path(r), with: .color(on ? Pixel.magenta : Pixel.bg))
                             }
                         }
                     }

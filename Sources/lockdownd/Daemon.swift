@@ -82,6 +82,13 @@ final class Daemon {
         engine.housekeep(&state, now: now, bootID: bootID)
         if before != state.lockBoot { dirty = true }
 
+        let restartsBefore = state.freezeRestarts
+        let escaped = engine.escapeFreezeAfterRestarts(&state, now: now, bootID: bootID)
+        if restartsBefore != state.freezeRestarts { dirty = true }
+        if !escaped.isEmpty {
+            Log.info("ended freeze after \(LockEngine.freezeEscapeRestarts) restarts in a row: \(escaped.map(\.name))")
+        }
+
         let e = engine.enforcement(for: state, now: now, bootID: bootID)
         if e.web != lastEnforcement.web || e.hardBlockIPs != lastEnforcement.hardBlockIPs {
             dns.setPolicies(e.web)

@@ -286,11 +286,11 @@ struct Scanlines: View {
 /// Toggles visibility on a fixed beat, like an arcade attract screen.
 struct Blink: ViewModifier {
     var interval: Double = 0.6
-    @State private var on = true
 
     func body(content: Content) -> some View {
-        content.opacity(on ? 1 : 0)
-            .onReceive(Timer.publish(every: interval, on: .main, in: .common).autoconnect()) { _ in on.toggle() }
+        TimelineView(.periodic(from: .now, by: interval)) { ctx in
+            content.opacity(Int(ctx.date.timeIntervalSinceReferenceDate / interval) % 2 == 0 ? 1 : 0)
+        }
     }
 }
 

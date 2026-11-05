@@ -31,6 +31,117 @@ final class DomainMatcherTests: XCTestCase {
     }
 }
 
+final class RunModeTests: XCTestCase {
+    var cal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }
+    var e: LockEngine {
+        var e = LockEngine()
+        e.calendar = cal
+        return e
+    }
+    /// 2026-11-04 is a Wednesday (weekday 4).
+    func wed(_ h: Int, _ m: Int = 0) -> Date {
+        cal.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: h, minute: m))!
+    }
+
+    func testScheduledBlockCantBeStartedByHand() throws {
+        let b = Block(name: "S", websites: ["x.com"], scheduleEnabled: true,
+                      schedule: [ScheduleRange(weekday: 4, startMinute: 960, endMinute: 990)])
+        var s = EngineState()
+        s.blocks = [b]
+        XCTAssertThrowsError(try e.start(b.id, endsAt: wed(15), in: &s, now: wed(14), bootID: "A"))
+        XCTAssertFalse(e.activity(of: b, in: s, now: wed(14)).running)
+        XCTAssertTrue(e.activity(of: b, in: s, now: wed(16)).enforcing)
+    }
+
+    func testNextScheduleStart() {
+        let r = [ScheduleRange(weekday: 4, startMinute: 960, endMinute: 990), ScheduleRange(weekday: 2, startMinute: 0, endMinute: 30)]
+        XCTAssertEqual(e.nextScheduleStart(r, after: wed(15, 56)), wed(16))
+        // During or just after today's window, the next one is Monday's.
+        let monday = cal.date(byAdding: .day, value: 5, to: wed(0))!
+        XCTAssertEqual(e.nextScheduleStart(r, after: wed(16, 10)), monday)
+        XCTAssertNil(e.nextScheduleStart([], after: wed(16)))
+    }
+
+    func testNextScheduleStartSkipsContinuationPastMidnight() {
+        let r = [ScheduleRange(weekday: 4, startMinute: 1320, endMinute: 1440), ScheduleRange(weekday: 5, startMinute: 0, endMinute: 420)]
+        let next = e.nextScheduleStart(r, after: wed(23))
+        XCTAssertEqual(next, cal.date(byAdding: .day, value: 7, to: wed(22)))
+    }
+}
+
+final class FreezeEscapeTests: XCTestCase {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    let e = LockEngine()
+
+    /// A random-text freeze running for a day, first seen on boot "A".
+    func frozen() throws -> (Block, EngineState) {
+        var b = Block(name: "F", kind: .frozen)
+        b.lock = .randomText(length: 5)
+        var s = EngineState()
+        s.blocks = [b]
+        try e.start(b.id, endsAt: t0.addingTimeInterval(86400), in: &s, now: t0, bootID: "A")
+        XCTAssertTrue(e.escapeFreezeAfterRestarts(&s, now: t0, bootID: "A").isEmpty)
+        return (b, s)
+    }
+
+    func testThirdRestartInARowEndsFreeze() throws {
+        let (b, initial) = try frozen()
+        var s = initial
+        XCTAssertTrue(e.escapeFreezeAfterRestarts(&s, now: t0 + 120, bootID: "B").isEmpty)
+        XCTAssertTrue(e.escapeFreezeAfterRestarts(&s, now: t0 + 240, bootID: "C").isEmpty)
+        XCTAssertNotNil(e.enforcement(for: s, now: t0 + 240, bootID: "C").frozen)
+        XCTAssertEqual(e.escapeFreezeAfterRestarts(&s, now: t0 + 360, bootID: "D").map(\.id), [b.id])
+        XCTAssertNil(e.enforcement(for: s, now: t0 + 360, bootID: "D").frozen)
+        XCTAssertNil(s.freezeRestarts)
+    }
+
+    func testSameBootDoesNotCount() throws {
+        var (_, s) = try frozen()
+        for i in 1...10 { XCTAssertTrue(e.escapeFreezeAfterRestarts(&s, now: t0 + Double(i), bootID: "A").isEmpty) }
+        XCTAssertEqual(s.freezeRestarts?.count, 0)
+    }
+
+    func testLongGapRestartsTheCountAtOne() throws {
+        var (_, s) = try frozen()
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0 + 120, bootID: "B")
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0 + 240, bootID: "C")
+        XCTAssertTrue(e.escapeFreezeAfterRestarts(&s, now: t0 + 3600, bootID: "D").isEmpty)
+        XCTAssertEqual(s.freezeRestarts?.count, 1)
+        XCTAssertNotNil(e.enforcement(for: s, now: t0 + 3600, bootID: "D").frozen)
+    }
+
+    func testFreezeRunningLongBeforeFirstRestartStillCounts() throws {
+        var (_, s) = try frozen()
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0 + 7200, bootID: "B")
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0 + 7320, bootID: "C")
+        XCTAssertFalse(e.escapeFreezeAfterRestarts(&s, now: t0 + 7440, bootID: "D").isEmpty)
+    }
+
+    func testOtherBlocksKeepRunning() throws {
+        var (_, s) = try frozen()
+        var web = Block(name: "W", websites: ["x.com"])
+        web.lock = .randomText(length: 5)
+        s.blocks.append(web)
+        try e.start(web.id, endsAt: t0.addingTimeInterval(86400), in: &s, now: t0, bootID: "A")
+        for (i, boot) in ["B", "C", "D"].enumerated() {
+            _ = e.escapeFreezeAfterRestarts(&s, now: t0 + Double(i + 1) * 120, bootID: boot)
+        }
+        XCTAssertTrue(e.activity(of: web, in: s, now: t0 + 400).enforcing)
+        XCTAssertTrue(e.isLocked(web, in: s, now: t0 + 400, bootID: "D"))
+    }
+
+    func testNoFreezeNothingCounted() {
+        var s = EngineState()
+        s.blocks = [Block(name: "W", websites: ["x.com"])]
+        XCTAssertTrue(e.escapeFreezeAfterRestarts(&s, now: t0, bootID: "A").isEmpty)
+        XCTAssertNil(s.freezeRestarts)
+    }
+}
+
 final class LockEngineTests: XCTestCase {
     var cal: Calendar = {
         var c = Calendar(identifier: .gregorian)

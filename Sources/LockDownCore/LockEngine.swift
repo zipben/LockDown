@@ -15,12 +15,14 @@ public struct EngineState: Codable {
     public var grants: [UUID: Date] = [:]
     /// Scheduled runs stopped early: block -> skip the schedule until this time (the window's end).
     public var skips: [UUID: Date] = [:]
+    /// Consecutive restarts during a running freeze, for the emergency escape.
+    public var freezeRestarts: FreezeRestarts?
     public var settings = GlobalSettings()
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, settings
+        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, freezeRestarts, settings
     }
 
     /// Tolerates missing keys so state files from older versions still load.
@@ -33,8 +35,15 @@ public struct EngineState: Codable {
         lockBoot = try c.decodeIfPresent([UUID: String].self, forKey: .lockBoot) ?? [:]
         grants = try c.decodeIfPresent([UUID: Date].self, forKey: .grants) ?? [:]
         skips = try c.decodeIfPresent([UUID: Date].self, forKey: .skips) ?? [:]
+        freezeRestarts = try c.decodeIfPresent(FreezeRestarts.self, forKey: .freezeRestarts)
         settings = try c.decodeIfPresent(GlobalSettings.self, forKey: .settings) ?? GlobalSettings()
     }
+}
+
+public struct FreezeRestarts: Codable, Equatable {
+    public var bootID: String
+    public var at: Date
+    public var count: Int
 }
 
 /// What a block is doing right now.
@@ -167,6 +176,20 @@ public struct LockEngine {
             start = probe
         }
         return (start, end)
+    }
+
+    /// When the next contiguous window begins, strictly after `date`. nil for an empty schedule.
+    public func nextScheduleStart(_ ranges: [ScheduleRange], after date: Date) -> Date? {
+        let midnight = calendar.startOfDay(for: date)
+        for offset in 0...7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: midnight) else { continue }
+            let weekday = calendar.component(.weekday, from: day)
+            for r in ranges.filter({ $0.weekday == weekday }).sorted(by: { $0.startMinute < $1.startMinute }) {
+                let start = self.date(on: day, minute: r.startMinute)
+                if start > date, rangeContaining(ranges, start.addingTimeInterval(-1)) == nil { return start }
+            }
+        }
+        return nil
     }
 
     func rangeContaining(_ ranges: [ScheduleRange], _ date: Date) -> ScheduleRange? {
@@ -311,6 +334,9 @@ public struct LockEngine {
         if endsAt == nil, b.lock == .timer {
             throw EngineError.invalid("A locked-in block needs an end time.")
         }
+        if b.scheduleEnabled, state.sessions[id] == nil {
+            throw EngineError.invalid("\(b.name) runs on its schedule. Switch it to manual to start it yourself.")
+        }
         if let current = state.sessions[id], isLocked(b, in: state, now: now, bootID: bootID) {
             // Locked runs can only be extended.
             switch (current.endsAt, endsAt) {
@@ -332,12 +358,45 @@ public struct LockEngine {
         if isLocked(b, in: state, now: now, bootID: bootID) {
             throw EngineError.locked("\(b.name) is locked. \(lockReason(b))")
         }
-        state.sessions[id] = nil
-        state.breaks[id] = nil
+        endRun(b, in: &state, now: now)
+    }
+
+    private func endRun(_ b: Block, in state: inout EngineState, now: Date) {
+        state.sessions[b.id] = nil
+        state.breaks[b.id] = nil
         // Stopping during a scheduled window skips the rest of that window.
         if b.scheduleEnabled, let window = scheduleWindow(b.schedule, at: now) {
-            state.skips[id] = window.end
+            state.skips[b.id] = window.end
         }
+    }
+
+    /// Restarts in a row that end a running freeze, whatever its lock. A freeze survives reboots,
+    /// so without this a broken freeze screen could only be escaped through Safe Mode.
+    public static let freezeEscapeRestarts = 3
+    /// A restart only continues the chain if it comes within this long of the previous boot.
+    public static let freezeRestartWindow: TimeInterval = 600
+
+    /// Call on every tick. Counts a new boot during a running freeze and, on the last restart,
+    /// ends every running freeze. Returns the blocks it ended.
+    public func escapeFreezeAfterRestarts(_ state: inout EngineState, now: Date, bootID: String) -> [Block] {
+        let frozen = state.blocks.filter { $0.kind == .frozen && activity(of: $0, in: state, now: now).running }
+        guard !frozen.isEmpty else {
+            state.freezeRestarts = nil
+            return []
+        }
+        guard let last = state.freezeRestarts else {
+            state.freezeRestarts = FreezeRestarts(bootID: bootID, at: now, count: 0)
+            return []
+        }
+        guard last.bootID != bootID else { return [] }
+        let count = now.timeIntervalSince(last.at) <= Self.freezeRestartWindow ? last.count + 1 : 1
+        guard count >= Self.freezeEscapeRestarts else {
+            state.freezeRestarts = FreezeRestarts(bootID: bootID, at: now, count: count)
+            return []
+        }
+        state.freezeRestarts = nil
+        for b in frozen { endRun(b, in: &state, now: now) }
+        return frozen
     }
 
     public func allowanceRemaining(_ block: Block, in state: EngineState, now: Date) -> Int? {
