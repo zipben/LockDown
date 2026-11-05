@@ -85,6 +85,21 @@ public enum FrozenMode: String, Codable, Hashable, CaseIterable {
     case lockScreen, logout, shutdown
 }
 
+/// Random Flicker: a freeze that turns itself on and off, drawing each window's length from these bounds.
+public struct FlickerPolicy: Codable, Hashable {
+    public var frozenMinMinutes: Int
+    public var frozenMaxMinutes: Int
+    public var freeMinMinutes: Int
+    public var freeMaxMinutes: Int
+
+    public init(frozenMinMinutes: Int = 10, frozenMaxMinutes: Int = 30, freeMinMinutes: Int = 30, freeMaxMinutes: Int = 90) {
+        self.frozenMinMinutes = frozenMinMinutes
+        self.frozenMaxMinutes = frozenMaxMinutes
+        self.freeMinMinutes = freeMinMinutes
+        self.freeMaxMinutes = freeMaxMinutes
+    }
+}
+
 public struct Block: Codable, Hashable, Identifiable {
     public var id: UUID
     public var name: String
@@ -98,9 +113,12 @@ public struct Block: Codable, Hashable, Identifiable {
     public var titleKeywords: [String]
     public var scheduleEnabled: Bool
     public var schedule: [ScheduleRange]
+    /// Set on a freeze that runs by Random Flicker. Replaces the schedule, and is optional so state
+    /// files from older versions still load.
+    public var flicker: FlickerPolicy?
     public var breakPolicy: BreakPolicy
     public var lock: LockPolicy
-    /// When true, a locked scheduled block can't be loosened even outside its scheduled hours.
+    /// When true, a locked scheduled or flickering block can't be loosened even while it isn't running.
     public var lockScheduleAlways: Bool
     public var frozenMode: FrozenMode
 
@@ -108,7 +126,7 @@ public struct Block: Codable, Hashable, Identifiable {
         id: UUID = UUID(), name: String, kind: BlockKind = .standard,
         websites: [String] = [], websiteExceptions: [String] = [], blockEntireInternet: Bool = false,
         apps: [AppRef] = [], titleKeywords: [String] = [],
-        scheduleEnabled: Bool = false, schedule: [ScheduleRange] = [],
+        scheduleEnabled: Bool = false, schedule: [ScheduleRange] = [], flicker: FlickerPolicy? = nil,
         breakPolicy: BreakPolicy = .none, lock: LockPolicy = .none,
         lockScheduleAlways: Bool = false, frozenMode: FrozenMode = .lockScreen
     ) {
@@ -122,6 +140,7 @@ public struct Block: Codable, Hashable, Identifiable {
         self.titleKeywords = titleKeywords
         self.scheduleEnabled = scheduleEnabled
         self.schedule = schedule
+        self.flicker = flicker
         self.breakPolicy = breakPolicy
         self.lock = lock
         self.lockScheduleAlways = lockScheduleAlways

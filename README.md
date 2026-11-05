@@ -43,7 +43,9 @@ is stopped while a locked web block runs, it leaves DNS redirected (fails closed
 
 **Breaks.** Pomodoro cycles, or a daily allowance spent on demand.
 
-**When a block runs.** Each block runs one of two ways: when you start it, or by itself at the hours painted on its weekly schedule. A scheduled block can't be started by hand.
+**When a block runs.** Each block runs when you start it, or by itself at the hours painted on its weekly schedule. A scheduled block can't be started by hand.
+
+**Random Flicker.** A freeze can also turn itself on and off at random, day and night, so you can't plan around when the computer is available. You set a lower and upper bound in minutes for the frozen and free windows, and each new window gets a new random length within them. Flicker starts with a free window and the app never shows when the next freeze is due. Restarting 3 times in a row during a freeze turns flicker off.
 
 **Freeze.** Full-screen lock, log out, or shut down for the duration. A freeze survives reboots, so there's an emergency exit in case the freeze screen ever breaks: restarting 3 times in a row (each within 10 minutes of the last boot) ends any running freeze, whatever its lock. Other blocks keep running.
 

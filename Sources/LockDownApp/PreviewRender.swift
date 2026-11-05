@@ -46,7 +46,12 @@ enum PreviewRender {
             BlockStatus(block: focus, activity: Activity(source: .timer, enforcing: true, endsAt: now.addingTimeInterval(3600)), locked: true, lockReason: "", allowanceRemaining: nil),
         ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: true)
 
-        let tabs: [(String, Tab, Snapshot?)] = [("blocks", .blocks, snap), ("running", .blocks, running), ("stats", .stats, snap), ("options", .settings, snap), ("insert-coin", .blocks, nil)]
+        let flicker = Block(name: "Flicker", kind: .frozen, flicker: FlickerPolicy(), lock: .randomText(length: 40), lockScheduleAlways: true)
+        let flickering = Snapshot(now: now, blocks: [
+            BlockStatus(block: flicker, activity: .idle, locked: true, lockReason: "", allowanceRemaining: nil),
+        ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: false)
+
+        let tabs: [(String, Tab, Snapshot?)] = [("blocks", .blocks, snap), ("running", .blocks, running), ("flicker", .blocks, flickering), ("stats", .stats, snap), ("options", .settings, snap), ("insert-coin", .blocks, nil)]
         for (name, tab, s) in tabs {
             let store = Store(preview: s)
             let root = ContentView(initialTab: tab).environmentObject(store)

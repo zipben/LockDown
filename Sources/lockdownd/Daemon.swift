@@ -81,6 +81,7 @@ final class Daemon {
         let before = state.lockBoot
         engine.housekeep(&state, now: now, bootID: bootID)
         if before != state.lockBoot { dirty = true }
+        if engine.advanceFlicker(&state, now: now) { dirty = true }
 
         let restartsBefore = state.freezeRestarts
         let escaped = engine.escapeFreezeAfterRestarts(&state, now: now, bootID: bootID)

@@ -343,3 +343,194 @@ final class DNSMessageTests: XCTestCase {
         XCTAssertNil(DNSMessage.parseQuery(r), "responses aren't queries")
     }
 }
+
+final class FlickerTests: XCTestCase {
+    let t0 = Date(timeIntervalSince1970: 1_750_000_000)
+    let e = LockEngine()
+    let policy = FlickerPolicy(frozenMinMinutes: 10, frozenMaxMinutes: 20, freeMinMinutes: 30, freeMaxMinutes: 60)
+
+    func flickering(lock: LockPolicy = .none, always: Bool = false) -> (Block, EngineState) {
+        let b = Block(name: "F", kind: .frozen, flicker: policy, lock: lock, lockScheduleAlways: always)
+        var s = EngineState()
+        s.blocks = [b]
+        return (b, s)
+    }
+
+    func testStartsFreeThenAlternatesWithinBoundsDrawingNewLengths() {
+        let (b, initial) = flickering()
+        var s = initial
+        var now = t0
+        XCTAssertTrue(e.advanceFlicker(&s, now: now))
+        var expectFrozen = false
+        var frozenLengths = Set<TimeInterval>(), freeLengths = Set<TimeInterval>()
+        for _ in 0..<400 {
+            let p = s.flickerPhases[b.id]!
+            XCTAssertEqual(p.frozen, expectFrozen)
+            let length = p.endsAt.timeIntervalSince(p.startedAt)
+            if p.frozen {
+                XCTAssertTrue((600...1200).contains(length))
+                frozenLengths.insert(length)
+            } else {
+                XCTAssertTrue((1800...3600).contains(length))
+                freeLengths.insert(length)
+            }
+            let mid = p.startedAt.addingTimeInterval(length / 2)
+            XCTAssertFalse(e.advanceFlicker(&s, now: mid))
+            XCTAssertEqual(e.activity(of: b, in: s, now: mid).source, p.frozen ? .flicker : .none)
+            XCTAssertEqual(e.enforcement(for: s, now: mid, bootID: "A").frozen != nil, p.frozen)
+            now = p.endsAt
+            XCTAssertTrue(e.advanceFlicker(&s, now: now))
+            expectFrozen.toggle()
+        }
+        XCTAssertGreaterThan(frozenLengths.count, 50)
+        XCTAssertGreaterThan(freeLengths.count, 50)
+    }
+
+    func testEqualBoundsGiveThatExactLength() {
+        let (b, initial) = flickering()
+        var s = initial
+        s.blocks[0].flicker = FlickerPolicy(frozenMinMinutes: 7, frozenMaxMinutes: 7, freeMinMinutes: 3, freeMaxMinutes: 3)
+        _ = e.advanceFlicker(&s, now: t0)
+        XCTAssertEqual(s.flickerPhases[b.id]?.endsAt, t0 + 180)
+        _ = e.advanceFlicker(&s, now: t0 + 180)
+        XCTAssertEqual(s.flickerPhases[b.id]?.endsAt, t0 + 180 + 420)
+    }
+
+    func testWakingAfterALongSleepDrawsFromNow() {
+        let (b, initial) = flickering()
+        var s = initial
+        _ = e.advanceFlicker(&s, now: t0)
+        let later = t0 + 86400
+        XCTAssertTrue(e.advanceFlicker(&s, now: later))
+        let p = s.flickerPhases[b.id]!
+        XCTAssertEqual(p.startedAt, later)
+        XCTAssertTrue(p.frozen)
+        XCTAssertGreaterThanOrEqual(p.endsAt, later + 600)
+    }
+
+    func testStateSurvivesRoundTrip() throws {
+        let (b, initial) = flickering()
+        var s = initial
+        _ = e.advanceFlicker(&s, now: t0)
+        let decoded = try JSONDecoder().decode(EngineState.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(decoded.flickerPhases[b.id], s.flickerPhases[b.id])
+        XCTAssertEqual(decoded.blocks.first?.flicker, policy)
+    }
+
+    func testStateFromBeforeFlickerStillLoads() throws {
+        let id = UUID()
+        let old = """
+        {"blocks":[{"id":"\(id.uuidString)","name":"Old","kind":"frozen","websites":[],"websiteExceptions":[],
+        "blockEntireInternet":false,"apps":[],"titleKeywords":[],"scheduleEnabled":false,"schedule":[],
+        "breakPolicy":{"none":{}},"lock":{"none":{}},"lockScheduleAlways":false,"frozenMode":"lockScreen"}]}
+        """
+        let s = try JSONDecoder().decode(EngineState.self, from: Data(old.utf8))
+        XCTAssertEqual(s.blocks.first?.name, "Old")
+        XCTAssertNil(s.blocks.first?.flicker)
+        XCTAssertTrue(s.flickerPhases.isEmpty)
+    }
+
+    func testSaveRejectsBadBoundsAndKeepsModesExclusive() throws {
+        var s = EngineState()
+        var bad = Block(name: "B", kind: .frozen, flicker: FlickerPolicy(frozenMinMinutes: 20, frozenMaxMinutes: 10))
+        XCTAssertThrowsError(try e.save(bad, newPassword: nil, into: &s, now: t0, bootID: "A"))
+        bad.flicker = FlickerPolicy(frozenMinMinutes: 0)
+        XCTAssertThrowsError(try e.save(bad, newPassword: nil, into: &s, now: t0, bootID: "A"))
+        let both = Block(name: "C", kind: .frozen, scheduleEnabled: true, flicker: policy)
+        try e.save(both, newPassword: nil, into: &s, now: t0, bootID: "A")
+        XCTAssertFalse(s.blocks[0].scheduleEnabled)
+        let standard = Block(name: "D", flicker: policy)
+        try e.save(standard, newPassword: nil, into: &s, now: t0, bootID: "A")
+        XCTAssertNil(s.blocks[1].flicker)
+    }
+
+    func testCantBeStartedByHand() {
+        let (b, initial) = flickering()
+        var s = initial
+        XCTAssertThrowsError(try e.start(b.id, endsAt: t0 + 60, in: &s, now: t0, bootID: "A"))
+    }
+
+    func testStopEndsThisFreezeButFlickerStaysOn() throws {
+        let (b, initial) = flickering()
+        var s = initial
+        s.flickerPhases[b.id] = FlickerPhase(frozen: true, startedAt: t0, endsAt: t0 + 900)
+        try e.stop(b.id, in: &s, now: t0 + 60, bootID: "A")
+        XCTAssertFalse(e.activity(of: b, in: s, now: t0 + 60).running)
+        XCTAssertTrue(e.advanceFlicker(&s, now: t0 + 62))
+        XCTAssertEqual(s.flickerPhases[b.id]?.frozen, false)
+        XCTAssertNotNil(s.blocks[0].flicker)
+    }
+
+    func testLockedFreezeCantBeStoppedOrLoosened() throws {
+        var (b, s) = flickering(lock: .randomText(length: 5))
+        s.flickerPhases[b.id] = FlickerPhase(frozen: true, startedAt: t0, endsAt: t0 + 900)
+        XCTAssertThrowsError(try e.stop(b.id, in: &s, now: t0 + 60, bootID: "A"))
+        var off = b
+        off.flicker = nil
+        XCTAssertThrowsError(try e.save(off, newPassword: nil, into: &s, now: t0 + 60, bootID: "A"))
+        for looser in [FlickerPolicy(frozenMinMinutes: 5, frozenMaxMinutes: 20, freeMinMinutes: 30, freeMaxMinutes: 60),
+                       FlickerPolicy(frozenMinMinutes: 10, frozenMaxMinutes: 15, freeMinMinutes: 30, freeMaxMinutes: 60),
+                       FlickerPolicy(frozenMinMinutes: 10, frozenMaxMinutes: 20, freeMinMinutes: 40, freeMaxMinutes: 60),
+                       FlickerPolicy(frozenMinMinutes: 10, frozenMaxMinutes: 20, freeMinMinutes: 30, freeMaxMinutes: 90)] {
+            b.flicker = looser
+            XCTAssertThrowsError(try e.save(b, newPassword: nil, into: &s, now: t0 + 60, bootID: "A"))
+        }
+        b.flicker = FlickerPolicy(frozenMinMinutes: 15, frozenMaxMinutes: 25, freeMinMinutes: 20, freeMaxMinutes: 40)
+        XCTAssertNoThrow(try e.save(b, newPassword: nil, into: &s, now: t0 + 60, bootID: "A"))
+        XCTAssertEqual(s.flickerPhases[b.id]?.endsAt, t0 + 900)
+    }
+
+    func testBetweenFreezesLockOnlyHoldsWithTheOption() throws {
+        let (plain, initial) = flickering(lock: .randomText(length: 5))
+        var s = initial
+        _ = e.advanceFlicker(&s, now: t0)
+        XCTAssertFalse(e.isLocked(plain, in: s, now: t0 + 1, bootID: "A"))
+        let (guarded, initial2) = flickering(lock: .randomText(length: 5), always: true)
+        s = initial2
+        _ = e.advanceFlicker(&s, now: t0)
+        XCTAssertTrue(e.isLocked(guarded, in: s, now: t0 + 1, bootID: "A"))
+        var off = guarded
+        off.flicker = nil
+        XCTAssertThrowsError(try e.save(off, newPassword: nil, into: &s, now: t0 + 1, bootID: "A"))
+    }
+
+    func testTurningOffRemovesThePhase() throws {
+        var (b, s) = flickering()
+        _ = e.advanceFlicker(&s, now: t0)
+        b.flicker = nil
+        try e.save(b, newPassword: nil, into: &s, now: t0 + 1, bootID: "A")
+        XCTAssertTrue(e.advanceFlicker(&s, now: t0 + 2))
+        XCTAssertNil(s.flickerPhases[b.id])
+    }
+
+    func testNewBoundsShortenAWindowThatWouldOutlastThem() throws {
+        var (b, s) = flickering()
+        s.flickerPhases[b.id] = FlickerPhase(frozen: false, startedAt: t0, endsAt: t0 + 3600)
+        b.flicker = FlickerPolicy(frozenMinMinutes: 10, frozenMaxMinutes: 20, freeMinMinutes: 1, freeMaxMinutes: 2)
+        try e.save(b, newPassword: nil, into: &s, now: t0 + 10, bootID: "A")
+        XCTAssertEqual(s.flickerPhases[b.id]?.endsAt, t0 + 130)
+    }
+
+    func testDeleteClearsThePhase() throws {
+        let (b, initial) = flickering()
+        var s = initial
+        _ = e.advanceFlicker(&s, now: t0)
+        try e.delete(b.id, from: &s, now: t0 + 1, bootID: "A")
+        XCTAssertNil(s.flickerPhases[b.id])
+    }
+
+    func testEmergencyEscapeTurnsFlickerOff() {
+        let (b, initial) = flickering(lock: .timer, always: true)
+        var s = initial
+        s.flickerPhases[b.id] = FlickerPhase(frozen: true, startedAt: t0, endsAt: t0 + 86400)
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0, bootID: "A")
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0 + 120, bootID: "B")
+        _ = e.escapeFreezeAfterRestarts(&s, now: t0 + 240, bootID: "C")
+        XCTAssertEqual(e.escapeFreezeAfterRestarts(&s, now: t0 + 360, bootID: "D").map(\.id), [b.id])
+        XCTAssertNil(s.blocks[0].flicker)
+        XCTAssertNil(e.enforcement(for: s, now: t0 + 360, bootID: "D").frozen)
+        XCTAssertFalse(e.isLocked(s.blocks[0], in: s, now: t0 + 360, bootID: "D"))
+        _ = e.advanceFlicker(&s, now: t0 + 362)
+        XCTAssertNil(s.flickerPhases[b.id])
+    }
+}

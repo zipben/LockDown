@@ -17,12 +17,14 @@ public struct EngineState: Codable {
     public var skips: [UUID: Date] = [:]
     /// Consecutive restarts during a running freeze, for the emergency escape.
     public var freezeRestarts: FreezeRestarts?
+    /// The current window of each flickering block.
+    public var flickerPhases: [UUID: FlickerPhase] = [:]
     public var settings = GlobalSettings()
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, freezeRestarts, settings
+        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, freezeRestarts, flickerPhases, settings
     }
 
     /// Tolerates missing keys so state files from older versions still load.
@@ -36,6 +38,7 @@ public struct EngineState: Codable {
         grants = try c.decodeIfPresent([UUID: Date].self, forKey: .grants) ?? [:]
         skips = try c.decodeIfPresent([UUID: Date].self, forKey: .skips) ?? [:]
         freezeRestarts = try c.decodeIfPresent(FreezeRestarts.self, forKey: .freezeRestarts)
+        flickerPhases = try c.decodeIfPresent([UUID: FlickerPhase].self, forKey: .flickerPhases) ?? [:]
         settings = try c.decodeIfPresent(GlobalSettings.self, forKey: .settings) ?? GlobalSettings()
     }
 }
@@ -46,9 +49,15 @@ public struct FreezeRestarts: Codable, Equatable {
     public var count: Int
 }
 
+public struct FlickerPhase: Codable, Equatable {
+    public var frozen: Bool
+    public var startedAt: Date
+    public var endsAt: Date
+}
+
 /// What a block is doing right now.
 public struct Activity: Codable, Hashable {
-    public enum Source: String, Codable { case none, timer, schedule }
+    public enum Source: String, Codable { case none, timer, schedule, flicker }
     public var source: Source
     /// True while the block's rules are being enforced (running and not on a break).
     public var enforcing: Bool
@@ -139,6 +148,15 @@ public struct LockEngine {
                 end = max(e, window.end)
             }
         }
+        if block.flicker != nil, let phase = state.flickerPhases[block.id], phase.frozen, now < phase.endsAt {
+            if source == .none {
+                source = .flicker
+                start = phase.startedAt
+                end = phase.endsAt
+            } else if let e = end {
+                end = max(e, phase.endsAt)
+            }
+        }
         guard source != .none, let runStart = start else { return .idle }
 
         if let b = state.breaks[block.id], b > now {
@@ -156,6 +174,32 @@ public struct LockEngine {
             return Activity(source: source, enforcing: true, endsAt: end, nextBreakAt: restStart)
         }
         return Activity(source: source, enforcing: true, endsAt: end)
+    }
+
+    /// Call on every tick. Starts the next flicker window for any block whose window has ended, with
+    /// a new length drawn from its bounds. A new flicker starts free, so saving it can't lock you out
+    /// straight away. Returns true if anything changed.
+    public func advanceFlicker<R: RandomNumberGenerator>(_ state: inout EngineState, now: Date, using rng: inout R) -> Bool {
+        var changed = false
+        for block in state.blocks {
+            guard let policy = block.flicker else {
+                if state.flickerPhases.removeValue(forKey: block.id) != nil { changed = true }
+                continue
+            }
+            let current = state.flickerPhases[block.id]
+            if let current, now < current.endsAt { continue }
+            let frozen = current.map { !$0.frozen } ?? false
+            let (low, high) = frozen ? (policy.frozenMinMinutes, policy.frozenMaxMinutes) : (policy.freeMinMinutes, policy.freeMaxMinutes)
+            let seconds = Int.random(in: (low * 60)...(max(low, high) * 60), using: &rng)
+            state.flickerPhases[block.id] = FlickerPhase(frozen: frozen, startedAt: now, endsAt: now.addingTimeInterval(Double(seconds)))
+            changed = true
+        }
+        return changed
+    }
+
+    public func advanceFlicker(_ state: inout EngineState, now: Date) -> Bool {
+        var rng = SystemRandomNumberGenerator()
+        return advanceFlicker(&state, now: now, using: &rng)
     }
 
     /// The contiguous scheduled window containing `date`, following ranges across midnight.
@@ -212,10 +256,13 @@ public struct LockEngine {
         if block.lock == .none { return false }
         if let g = state.grants[block.id], g > now { return false }
         let running = activity(of: block, in: state, now: now).running
-        let scheduleGuard = block.lockScheduleAlways && block.scheduleEnabled && !block.schedule.isEmpty
-        guard running || scheduleGuard else { return false }
+        guard running || locksBetweenRuns(block) else { return false }
         if case .restart = block.lock, let b = state.lockBoot[block.id], b != bootID { return false }
         return true
+    }
+
+    func locksBetweenRuns(_ block: Block) -> Bool {
+        block.lockScheduleAlways && (block.flicker != nil || (block.scheduleEnabled && !block.schedule.isEmpty))
     }
 
     public func lockReason(_ block: Block) -> String {
@@ -232,8 +279,7 @@ public struct LockEngine {
     public func housekeep(_ state: inout EngineState, now: Date, bootID: String) {
         for block in state.blocks {
             let act = activity(of: block, in: state, now: now)
-            let scheduleGuard = block.lockScheduleAlways && block.scheduleEnabled && !block.schedule.isEmpty
-            if case .restart = block.lock, act.running || scheduleGuard {
+            if case .restart = block.lock, act.running || locksBetweenRuns(block) {
                 if state.lockBoot[block.id] == nil { state.lockBoot[block.id] = bootID }
             } else {
                 state.lockBoot[block.id] = nil
@@ -263,6 +309,11 @@ public struct LockEngine {
             guard new.scheduleEnabled else { return false }
             for r in old.schedule where !new.schedule.contains(where: { $0.covers(r) }) { return false }
         }
+        if let o = old.flicker {
+            guard let n = new.flicker,
+                  n.frozenMinMinutes >= o.frozenMinMinutes, n.frozenMaxMinutes >= o.frozenMaxMinutes,
+                  n.freeMinMinutes <= o.freeMinMinutes, n.freeMaxMinutes <= o.freeMaxMinutes else { return false }
+        }
         switch (old.breakPolicy, new.breakPolicy) {
         case (_, .none): break
         case (.none, _): return false
@@ -291,6 +342,17 @@ public struct LockEngine {
             throw EngineError.invalid("Pomodoro minutes must be at least 1.")
         }
 
+        if block.kind != .frozen { block.flicker = nil }
+        if let f = block.flicker {
+            block.scheduleEnabled = false
+            guard f.frozenMinMinutes >= 1, f.freeMinMinutes >= 1 else {
+                throw EngineError.invalid("Flicker windows must be at least 1 minute.")
+            }
+            guard f.frozenMinMinutes <= f.frozenMaxMinutes, f.freeMinMinutes <= f.freeMaxMinutes else {
+                throw EngineError.invalid("A flicker window's lower bound can't be above its upper bound.")
+            }
+        }
+
         let existing = state.blocks.firstIndex { $0.id == block.id }
         if case .password = block.lock {
             if let pw = newPassword, !pw.isEmpty {
@@ -312,6 +374,11 @@ public struct LockEngine {
         } else {
             state.blocks.append(block)
         }
+        // New bounds apply from the next window, but the current one mustn't outlast them.
+        if let f = block.flicker, let phase = state.flickerPhases[block.id] {
+            let limit = now.addingTimeInterval(Double(phase.frozen ? f.frozenMaxMinutes : f.freeMaxMinutes) * 60)
+            if phase.endsAt > limit { state.flickerPhases[block.id]?.endsAt = limit }
+        }
     }
 
     public func delete(_ id: UUID, from state: inout EngineState, now: Date, bootID: String) throws {
@@ -325,6 +392,7 @@ public struct LockEngine {
         state.breaks[id] = nil
         state.grants[id] = nil
         state.lockBoot[id] = nil
+        state.flickerPhases[id] = nil
     }
 
     /// Starts (or extends) a timed run. `endsAt` nil = until stopped.
@@ -333,6 +401,9 @@ public struct LockEngine {
         if let e = endsAt, e <= now { throw EngineError.invalid("End time must be in the future.") }
         if endsAt == nil, b.lock == .timer {
             throw EngineError.invalid("A locked-in block needs an end time.")
+        }
+        if b.flicker != nil, state.sessions[id] == nil {
+            throw EngineError.invalid("\(b.name) runs on Random Flicker. Switch it to manual to start it yourself.")
         }
         if b.scheduleEnabled, state.sessions[id] == nil {
             throw EngineError.invalid("\(b.name) runs on its schedule. Switch it to manual to start it yourself.")
@@ -368,6 +439,10 @@ public struct LockEngine {
         if b.scheduleEnabled, let window = scheduleWindow(b.schedule, at: now) {
             state.skips[b.id] = window.end
         }
+        // Stopping during a flicker freeze ends that freeze. The next tick starts a free window.
+        if b.flicker != nil, state.flickerPhases[b.id]?.frozen == true {
+            state.flickerPhases[b.id]?.endsAt = now
+        }
     }
 
     /// Restarts in a row that end a running freeze, whatever its lock. A freeze survives reboots,
@@ -396,6 +471,10 @@ public struct LockEngine {
         }
         state.freezeRestarts = nil
         for b in frozen { endRun(b, in: &state, now: now) }
+        // Flicker would freeze again within minutes, so the escape turns it off altogether.
+        for i in state.blocks.indices where frozen.contains(where: { $0.id == state.blocks[i].id }) {
+            state.blocks[i].flicker = nil
+        }
         return frozen
     }
 

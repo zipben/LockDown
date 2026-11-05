@@ -106,6 +106,7 @@ struct BlockRow: View {
             if let e = a.endsAt { return "ON \(clockString(Int(e.timeIntervalSince(now))))" }
             return "ON - NO END"
         }
+        if status.block.flicker != nil { return "FLICKER ON" }
         guard status.block.scheduleEnabled else { return "IDLE" }
         return nextRunLabel(status.block, now: now).map { "NEXT \($0)" } ?? "NO HOURS SET"
     }
@@ -217,7 +218,8 @@ struct BlockEditor: View {
                 Button("STOP") { store.send(Request(.stopBlock, blockID: s.id)) }
                     .buttonStyle(PixelButtonStyle(color: Pixel.red, size: 9))
                     .disabled(s.locked)
-                    .help(s.activity.source == .schedule ? "Skip the rest of this scheduled window" : "Stop this run")
+                    .help(s.activity.source == .schedule ? "Skip the rest of this scheduled window"
+                          : s.activity.source == .flicker ? "End this freeze. Flicker stays on" : "Stop this run")
             }
         }
     }
@@ -353,6 +355,12 @@ struct BlockEditor: View {
                 PixelField(placeholder: originalHasPassword ? "NEW PASSWORD (LEAVE EMPTY TO KEEP)" : "SET PASSWORD", text: $newPassword, secure: true)
                     .frame(maxWidth: 380)
             }
+            if draft.flicker != nil && draft.lock != .none {
+                PixelToggle(label: "LOCK FLICKER BETWEEN FREEZES", isOn: $draft.lockScheduleAlways,
+                            detail: draft.lock == .timer
+                                ? "Locked in has no unlock, so only 3 restarts during a freeze can turn flicker off."
+                                : "Stops you switching flicker off while the computer is free.")
+            }
             if draft.scheduleEnabled && draft.lock != .none {
                 PixelToggle(label: "LOCK SCHEDULE OUTSIDE BLOCKED HOURS", isOn: $draft.lockScheduleAlways,
                             detail: "Stops you editing the schedule away before it starts.")
@@ -446,7 +454,8 @@ struct ActivityBadge: View {
                 Text(a.endsAt.map { "BLOCKING - \(clockString(Int($0.timeIntervalSince(now)))) LEFT" } ?? "BLOCKING - UNTIL STOPPED")
                     .foregroundStyle(Pixel.green)
             } else {
-                Text(status.block.scheduleEnabled ? nextRunLabel(status.block, now: now).map { "NEXT RUN \($0)" } ?? "NO HOURS SET" : "IDLE")
+                Text(status.block.flicker != nil ? "FLICKER ON - FREE FOR NOW"
+                     : status.block.scheduleEnabled ? nextRunLabel(status.block, now: now).map { "NEXT RUN \($0)" } ?? "NO HOURS SET" : "IDLE")
                     .foregroundStyle(Pixel.inkMuted)
             }
             if let next = a.nextBreakAt {

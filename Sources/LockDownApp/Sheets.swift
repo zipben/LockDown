@@ -197,7 +197,7 @@ func nextRunLabel(_ block: Block, now: Date) -> String? {
     return f.string(from: next).uppercased()
 }
 
-/// A block runs one of two ways: when you start it, or by itself on a schedule.
+/// A block runs when you start it or by itself on a schedule. A freeze can also flicker at random.
 struct RunModePanel: View {
     @EnvironmentObject var store: Store
     @Binding var block: Block
@@ -208,16 +208,30 @@ struct RunModePanel: View {
     var body: some View {
         PixelPanel(title: "WHEN IT RUNS", accent: Pixel.magenta) {
             HStack(spacing: 8) {
-                PixelChip(label: "WHEN I START IT", selected: !block.scheduleEnabled, color: Pixel.magenta) { block.scheduleEnabled = false }
-                PixelChip(label: "ON A SCHEDULE", selected: block.scheduleEnabled, color: Pixel.magenta) { block.scheduleEnabled = true }
+                PixelChip(label: "WHEN I START IT", selected: !block.scheduleEnabled && block.flicker == nil, color: Pixel.magenta) {
+                    block.scheduleEnabled = false
+                    block.flicker = nil
+                }
+                PixelChip(label: "ON A SCHEDULE", selected: block.scheduleEnabled, color: Pixel.magenta) {
+                    block.scheduleEnabled = true
+                    block.flicker = nil
+                }
+                if block.kind == .frozen {
+                    PixelChip(label: "RANDOM FLICKER", selected: block.flicker != nil, color: Pixel.magenta) {
+                        block.scheduleEnabled = false
+                        if block.flicker == nil { block.flicker = FlickerPolicy() }
+                    }
+                }
             }
-            if !block.scheduleEnabled {
+            if block.flicker != nil {
+                flickering
+            } else if !block.scheduleEnabled {
                 manual
             } else {
                 scheduled
             }
-            // Switching to a schedule doesn't cancel a run you already started.
-            if block.scheduleEnabled, !dirty, status?.activity.source == .timer { startButton }
+            // Switching away from manual doesn't cancel a run you already started.
+            if block.scheduleEnabled || block.flicker != nil, !dirty, status?.activity.source == .timer { startButton }
         }
     }
 
@@ -232,6 +246,47 @@ struct RunModePanel: View {
             startButton
             Text(dirty || status == nil ? "SAVE FIRST, THEN START IT." : "RUNS ONLY WHEN YOU START IT.")
                 .font(Pixel.font(7)).foregroundStyle(Pixel.inkDim)
+        }
+    }
+
+    var flickerNote: String {
+        if dirty || status == nil { return "SAVE TO TURN FLICKER ON. IT STARTS WITH A FREE WINDOW." }
+        if status?.activity.source == .flicker { return "FROZEN NOW. A NEW LENGTH IS PICKED EACH TIME." }
+        return "FLICKER IS ON. THE NEXT FREEZE COMES WITHOUT WARNING."
+    }
+
+    /// Steps by 5 above 5 minutes, snapping to multiples, and keeps each pair in order.
+    func flickerBound(_ bound: WritableKeyPath<FlickerPolicy, Int>, other: WritableKeyPath<FlickerPolicy, Int>, isLower: Bool) -> Binding<Int> {
+        Binding(
+            get: { block.flicker?[keyPath: bound] ?? 1 },
+            set: { new in
+                guard var f = block.flicker else { return }
+                let value = new < 5 ? new : new / 5 * 5
+                f[keyPath: bound] = value
+                f[keyPath: other] = isLower ? max(f[keyPath: other], value) : min(f[keyPath: other], value)
+                block.flicker = f
+            })
+    }
+
+    @ViewBuilder
+    var flickering: some View {
+        Text(flickerNote).font(Pixel.font(7)).foregroundStyle(Pixel.yellow)
+        flickerRow("FROZEN FOR", low: \.frozenMinMinutes, high: \.frozenMaxMinutes)
+        flickerRow("FREE FOR", low: \.freeMinMinutes, high: \.freeMaxMinutes)
+        Text("Runs day and night until you switch it off.")
+            .font(Pixel.font(7)).foregroundStyle(Pixel.inkMuted)
+        if block.frozenMode != .lockScreen {
+            Text("\(block.frozenMode == .logout ? "LOG OUT" : "SHUT DOWN") GIVES ONLY 20 SECONDS' NOTICE. UNSAVED WORK CAN BE LOST.")
+                .font(Pixel.font(7)).foregroundStyle(Pixel.red)
+        }
+    }
+
+    func flickerRow(_ label: String, low: WritableKeyPath<FlickerPolicy, Int>, high: WritableKeyPath<FlickerPolicy, Int>) -> some View {
+        HStack(spacing: 12) {
+            Text(label).font(Pixel.font(7)).foregroundStyle(Pixel.ink).frame(width: Pixel.ui(84), alignment: .leading)
+            PixelStepper(label: "AT LEAST", value: flickerBound(low, other: high, isLower: true), range: 1...720, step: 5)
+            PixelStepper(label: "AT MOST", value: flickerBound(high, other: low, isLower: false), range: 1...720, step: 5)
+            Text("MINUTES").font(Pixel.font(7)).foregroundStyle(Pixel.inkDim)
         }
     }
 
