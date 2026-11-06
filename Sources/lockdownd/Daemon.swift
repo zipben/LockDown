@@ -82,6 +82,10 @@ final class Daemon {
         engine.housekeep(&state, now: now, bootID: bootID)
         if before != state.lockBoot { dirty = true }
         if engine.advanceFlicker(&state, now: now) { dirty = true }
+        let reenableBefore = state.reenableChecked
+        let reenabled = engine.applyDailyReenable(&state, now: now)
+        if reenableBefore != state.reenableChecked { dirty = true }
+        if !reenabled.isEmpty { Log.info("re-enabled for the day: \(reenabled.map(\.name))") }
 
         let restartsBefore = state.freezeRestarts
         let escaped = engine.escapeFreezeAfterRestarts(&state, now: now, bootID: bootID)

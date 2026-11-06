@@ -19,12 +19,14 @@ public struct EngineState: Codable {
     public var freezeRestarts: FreezeRestarts?
     /// The current window of each flickering block.
     public var flickerPhases: [UUID: FlickerPhase] = [:]
+    /// When each block's daily re-enable was last checked, so a time missed while asleep still fires.
+    public var reenableChecked: [UUID: Date] = [:]
     public var settings = GlobalSettings()
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, freezeRestarts, flickerPhases, settings
+        case blocks, sessions, breaks, allowanceUsed, lockBoot, grants, skips, freezeRestarts, flickerPhases, reenableChecked, settings
     }
 
     /// Tolerates missing keys so state files from older versions still load.
@@ -39,6 +41,7 @@ public struct EngineState: Codable {
         skips = try c.decodeIfPresent([UUID: Date].self, forKey: .skips) ?? [:]
         freezeRestarts = try c.decodeIfPresent(FreezeRestarts.self, forKey: .freezeRestarts)
         flickerPhases = try c.decodeIfPresent([UUID: FlickerPhase].self, forKey: .flickerPhases) ?? [:]
+        reenableChecked = try c.decodeIfPresent([UUID: Date].self, forKey: .reenableChecked) ?? [:]
         settings = try c.decodeIfPresent(GlobalSettings.self, forKey: .settings) ?? GlobalSettings()
     }
 }
@@ -202,6 +205,35 @@ public struct LockEngine {
         return advanceFlicker(&state, now: now, using: &rng)
     }
 
+    /// Call on every tick. When a block's daily re-enable time has passed, relocks it and turns it back
+    /// on until it's next unlocked. A scheduled block keeps to its hours, so it only gets skipped hours
+    /// back. Returns the blocks it re-enabled.
+    public func applyDailyReenable(_ state: inout EngineState, now: Date) -> [Block] {
+        var reenabled: [Block] = []
+        for block in state.blocks {
+            guard let minute = block.reenableDailyMinute else {
+                state.reenableChecked[block.id] = nil
+                continue
+            }
+            guard let last = state.reenableChecked[block.id] else {
+                state.reenableChecked[block.id] = now
+                continue
+            }
+            var due = date(on: now, minute: minute)
+            if due > now { due = date(on: calendar.date(byAdding: .day, value: -1, to: due) ?? due, minute: minute) }
+            guard last < due else { continue }
+            state.reenableChecked[block.id] = now
+            state.grants[block.id] = nil
+            state.skips[block.id] = nil
+            state.lockBoot[block.id] = nil
+            if !block.scheduleEnabled {
+                state.sessions[block.id] = Session(startedAt: state.sessions[block.id]?.startedAt ?? now, endsAt: nil)
+            }
+            reenabled.append(block)
+        }
+        return reenabled
+    }
+
     /// The contiguous scheduled window containing `date`, following ranges across midnight.
     public func scheduleWindow(_ ranges: [ScheduleRange], at date: Date) -> (start: Date, end: Date)? {
         guard rangeContaining(ranges, date) != nil else { return nil }
@@ -262,7 +294,7 @@ public struct LockEngine {
     }
 
     func locksBetweenRuns(_ block: Block) -> Bool {
-        block.lockScheduleAlways && (block.flicker != nil || (block.scheduleEnabled && !block.schedule.isEmpty))
+        block.lockScheduleAlways && (block.flicker != nil || block.reenableDailyMinute != nil || (block.scheduleEnabled && !block.schedule.isEmpty))
     }
 
     public func lockReason(_ block: Block) -> String {
@@ -314,6 +346,7 @@ public struct LockEngine {
                   n.frozenMinMinutes >= o.frozenMinMinutes, n.frozenMaxMinutes >= o.frozenMaxMinutes,
                   n.freeMinMinutes <= o.freeMinMinutes, n.freeMaxMinutes <= o.freeMaxMinutes else { return false }
         }
+        if let o = old.reenableDailyMinute, new.reenableDailyMinute != o { return false }
         switch (old.breakPolicy, new.breakPolicy) {
         case (_, .none): break
         case (.none, _): return false
@@ -353,6 +386,14 @@ public struct LockEngine {
             }
         }
 
+        if block.kind == .frozen { block.reenableDailyMinute = nil }
+        if let m = block.reenableDailyMinute {
+            guard (0..<1440).contains(m) else { throw EngineError.invalid("Re-enable time must be within the day.") }
+            if block.lock == .timer {
+                throw EngineError.invalid("Re-enable daily needs a lock you can unlock. Locked in has no unlock.")
+            }
+        }
+
         let existing = state.blocks.firstIndex { $0.id == block.id }
         if case .password = block.lock {
             if let pw = newPassword, !pw.isEmpty {
@@ -365,6 +406,7 @@ public struct LockEngine {
             }
         }
 
+        let oldReenable = existing.flatMap { state.blocks[$0].reenableDailyMinute }
         if let i = existing {
             let old = state.blocks[i]
             if isLocked(old, in: state, now: now, bootID: bootID) && !isStricter(block, than: old) {
@@ -374,6 +416,8 @@ public struct LockEngine {
         } else {
             state.blocks.append(block)
         }
+        // A new time counts from now, so it can't fire for a time that's already gone by today.
+        if oldReenable != block.reenableDailyMinute { state.reenableChecked[block.id] = nil }
         // New bounds apply from the next window, but the current one mustn't outlast them.
         if let f = block.flicker, let phase = state.flickerPhases[block.id] {
             let limit = now.addingTimeInterval(Double(phase.frozen ? f.frozenMaxMinutes : f.freeMaxMinutes) * 60)
@@ -393,6 +437,7 @@ public struct LockEngine {
         state.grants[id] = nil
         state.lockBoot[id] = nil
         state.flickerPhases[id] = nil
+        state.reenableChecked[id] = nil
     }
 
     /// Starts (or extends) a timed run. `endsAt` nil = until stopped.

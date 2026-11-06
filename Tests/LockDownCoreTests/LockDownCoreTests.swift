@@ -534,3 +534,147 @@ final class FlickerTests: XCTestCase {
         XCTAssertNil(s.flickerPhases[b.id])
     }
 }
+
+final class DailyReenableTests: XCTestCase {
+    let e = LockEngine()
+    let lock = LockPolicy.randomText(length: 5)
+
+    func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        Calendar.current.date(from: DateComponents(year: 2026, month: 3, day: day, hour: hour, minute: minute))!
+    }
+
+    /// A manual block re-enabling at 7:00, saved on the evening of the 10th.
+    func saved(always: Bool = false) throws -> (Block, EngineState) {
+        let b = Block(name: "R", websites: ["x.com"], reenableDailyMinute: 420, lock: lock, lockScheduleAlways: always)
+        var s = EngineState()
+        try e.save(b, newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(10, 20)).isEmpty)
+        return (s.blocks[0], s)
+    }
+
+    func testDoesNotFireForATimeAlreadyPassedTodayThenFiresTomorrow() throws {
+        let (b, initial) = try saved()
+        var s = initial
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(10, 23)).isEmpty)
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(11, 6, 59)).isEmpty)
+        XCTAssertFalse(e.activity(of: b, in: s, now: at(11, 6, 59)).running)
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(11, 7)).map(\.id), [b.id])
+        XCTAssertTrue(e.activity(of: b, in: s, now: at(11, 7)).enforcing)
+        XCTAssertTrue(e.isLocked(b, in: s, now: at(11, 7), bootID: "A"))
+        XCTAssertNil(s.sessions[b.id]?.endsAt)
+    }
+
+    func testFiresOncePerDay() throws {
+        let (b, initial) = try saved()
+        var s = initial
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(11, 7)).count, 1)
+        s.grants[b.id] = at(11, 8)
+        try e.stop(b.id, in: &s, now: at(11, 7, 30), bootID: "A")
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(11, 7, 31)).isEmpty)
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(11, 23)).isEmpty)
+        XCTAssertFalse(e.activity(of: b, in: s, now: at(11, 23)).running)
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(12, 7)).count, 1)
+    }
+
+    func testTimeMissedAsleepFiresOnWaking() throws {
+        let (b, initial) = try saved()
+        var s = initial
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(14, 13)).map(\.id), [b.id])
+        XCTAssertTrue(e.activity(of: b, in: s, now: at(14, 13)).enforcing)
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(14, 13, 1)).isEmpty)
+    }
+
+    func testRelocksABlockUnlockedButStillRunning() throws {
+        let (b, initial) = try saved()
+        var s = initial
+        s.sessions[b.id] = Session(startedAt: at(10, 21), endsAt: at(11, 9))
+        e.grant(b.id, in: &s, now: at(11, 6, 59))
+        XCTAssertFalse(e.isLocked(b, in: s, now: at(11, 7), bootID: "A"))
+        _ = e.applyDailyReenable(&s, now: at(11, 7))
+        XCTAssertTrue(e.isLocked(b, in: s, now: at(11, 7), bootID: "A"))
+        XCTAssertEqual(s.sessions[b.id]?.startedAt, at(10, 21))
+        XCTAssertNil(s.sessions[b.id]?.endsAt, "a timed run shouldn't switch it off again later that day")
+    }
+
+    func testRelocksARestartLockAlreadyRestartedAway() throws {
+        var b = Block(name: "R", websites: ["x.com"], reenableDailyMinute: 420, lock: .restart)
+        var s = EngineState()
+        try e.save(b, newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
+        b = s.blocks[0]
+        _ = e.applyDailyReenable(&s, now: at(10, 20))
+        s.sessions[b.id] = Session(startedAt: at(10, 20), endsAt: nil)
+        e.housekeep(&s, now: at(10, 20), bootID: "A")
+        XCTAssertFalse(e.isLocked(b, in: s, now: at(10, 21), bootID: "B"))
+        _ = e.applyDailyReenable(&s, now: at(11, 7))
+        e.housekeep(&s, now: at(11, 7), bootID: "B")
+        XCTAssertTrue(e.isLocked(b, in: s, now: at(11, 7), bootID: "B"))
+    }
+
+    func testScheduledBlockGetsSkippedHoursBackButKeepsToItsHours() throws {
+        let weekday = Calendar.current.component(.weekday, from: at(11, 12))
+        let b = Block(name: "S", websites: ["x.com"], scheduleEnabled: true,
+                      schedule: [ScheduleRange(weekday: weekday, startMinute: 600, endMinute: 1200)], reenableDailyMinute: 420)
+        var s = EngineState()
+        try e.save(b, newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
+        _ = e.applyDailyReenable(&s, now: at(10, 20))
+        s.skips[b.id] = at(13, 0)
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(11, 7)).count, 1)
+        XCTAssertNil(s.skips[b.id])
+        XCTAssertNil(s.sessions[b.id])
+        XCTAssertFalse(e.activity(of: b, in: s, now: at(11, 8)).running)
+        XCTAssertEqual(e.activity(of: b, in: s, now: at(11, 12)).source, .schedule)
+    }
+
+    func testChangingTheTimeDoesNotFireForOneAlreadyPassed() throws {
+        var (b, s) = try saved()
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(11, 7)).count, 1)
+        s.sessions[b.id] = nil
+        b.reenableDailyMinute = 18 * 60
+        try e.save(b, newPassword: nil, into: &s, now: at(11, 20), bootID: "A")
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(11, 20)).isEmpty)
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(11, 21)).isEmpty)
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(12, 18)).count, 1)
+    }
+
+    func testLockProtectsTheSettingWhileRunningAndWhileOffOnlyWithTheOption() throws {
+        var (b, s) = try saved()
+        XCTAssertFalse(e.isLocked(b, in: s, now: at(10, 21), bootID: "A"))
+        _ = e.applyDailyReenable(&s, now: at(11, 7))
+        for change in [nil, 480] as [Int?] {
+            b.reenableDailyMinute = change
+            XCTAssertThrowsError(try e.save(b, newPassword: nil, into: &s, now: at(11, 8), bootID: "A"))
+        }
+        let (guarded, initial) = try saved(always: true)
+        var g = initial
+        XCTAssertTrue(e.isLocked(guarded, in: g, now: at(10, 21), bootID: "A"))
+        var off = guarded
+        off.reenableDailyMinute = nil
+        XCTAssertThrowsError(try e.save(off, newPassword: nil, into: &g, now: at(10, 21), bootID: "A"))
+        e.grant(guarded.id, in: &g, now: at(10, 21))
+        XCTAssertNoThrow(try e.save(off, newPassword: nil, into: &g, now: at(10, 21), bootID: "A"))
+    }
+
+    func testSaveRules() throws {
+        var s = EngineState()
+        XCTAssertThrowsError(try e.save(Block(name: "T", reenableDailyMinute: 420, lock: .timer), newPassword: nil, into: &s, now: at(10, 20), bootID: "A"))
+        XCTAssertThrowsError(try e.save(Block(name: "M", reenableDailyMinute: 1440), newPassword: nil, into: &s, now: at(10, 20), bootID: "A"))
+        try e.save(Block(name: "F", kind: .frozen, reenableDailyMinute: 420), newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
+        XCTAssertNil(s.blocks[0].reenableDailyMinute)
+    }
+
+    func testTurningOffStopsItAndClearsItsRecord() throws {
+        var (b, s) = try saved()
+        b.reenableDailyMinute = nil
+        try e.save(b, newPassword: nil, into: &s, now: at(10, 21), bootID: "A")
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(11, 7)).isEmpty)
+        XCTAssertNil(s.reenableChecked[b.id])
+        XCTAssertNil(s.sessions[b.id])
+    }
+
+    func testStateRoundTripKeepsTheRecord() throws {
+        let (b, s) = try saved()
+        let decoded = try JSONDecoder().decode(EngineState.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(decoded.reenableChecked[b.id], s.reenableChecked[b.id])
+        XCTAssertEqual(decoded.blocks[0].reenableDailyMinute, 420)
+    }
+}

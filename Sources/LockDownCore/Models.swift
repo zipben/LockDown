@@ -116,6 +116,9 @@ public struct Block: Codable, Hashable, Identifiable {
     /// Set on a freeze that runs by Random Flicker. Replaces the schedule, and is optional so state
     /// files from older versions still load.
     public var flicker: FlickerPolicy?
+    /// Minutes after midnight when the block turns itself back on and relocks every day, undoing any
+    /// unlock or stop. Standard blocks only, and optional so state files from older versions still load.
+    public var reenableDailyMinute: Int?
     public var breakPolicy: BreakPolicy
     public var lock: LockPolicy
     /// When true, a locked scheduled or flickering block can't be loosened even while it isn't running.
@@ -126,7 +129,7 @@ public struct Block: Codable, Hashable, Identifiable {
         id: UUID = UUID(), name: String, kind: BlockKind = .standard,
         websites: [String] = [], websiteExceptions: [String] = [], blockEntireInternet: Bool = false,
         apps: [AppRef] = [], titleKeywords: [String] = [],
-        scheduleEnabled: Bool = false, schedule: [ScheduleRange] = [], flicker: FlickerPolicy? = nil,
+        scheduleEnabled: Bool = false, schedule: [ScheduleRange] = [], flicker: FlickerPolicy? = nil, reenableDailyMinute: Int? = nil,
         breakPolicy: BreakPolicy = .none, lock: LockPolicy = .none,
         lockScheduleAlways: Bool = false, frozenMode: FrozenMode = .lockScreen
     ) {
@@ -141,6 +144,7 @@ public struct Block: Codable, Hashable, Identifiable {
         self.scheduleEnabled = scheduleEnabled
         self.schedule = schedule
         self.flicker = flicker
+        self.reenableDailyMinute = reenableDailyMinute
         self.breakPolicy = breakPolicy
         self.lock = lock
         self.lockScheduleAlways = lockScheduleAlways

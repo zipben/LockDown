@@ -51,7 +51,12 @@ enum PreviewRender {
             BlockStatus(block: flicker, activity: .idle, locked: true, lockReason: "", allowanceRemaining: nil),
         ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: false)
 
-        let tabs: [(String, Tab, Snapshot?)] = [("blocks", .blocks, snap), ("running", .blocks, running), ("flicker", .blocks, flickering), ("stats", .stats, snap), ("options", .settings, snap), ("insert-coin", .blocks, nil)]
+        let daily = Block(name: "Evening Pass", websites: ["reddit.com"], reenableDailyMinute: 7 * 60, lock: .randomText(length: 40), lockScheduleAlways: true)
+        let offForTheEvening = Snapshot(now: now, blocks: [
+            BlockStatus(block: daily, activity: .idle, locked: true, lockReason: "", allowanceRemaining: nil),
+        ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: false)
+
+        let tabs: [(String, Tab, Snapshot?)] = [("blocks", .blocks, snap), ("running", .blocks, running), ("reenable", .blocks, offForTheEvening), ("flicker", .blocks, flickering), ("stats", .stats, snap), ("options", .settings, snap), ("insert-coin", .blocks, nil)]
         for (name, tab, s) in tabs {
             let store = Store(preview: s)
             let root = ContentView(initialTab: tab).environmentObject(store)

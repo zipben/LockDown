@@ -107,6 +107,7 @@ struct BlockRow: View {
             return "ON - NO END"
         }
         if status.block.flicker != nil { return "FLICKER ON" }
+        if !status.block.scheduleEnabled, let m = status.block.reenableDailyMinute { return "BACK \(clockLabel(minute: m))" }
         guard status.block.scheduleEnabled else { return "IDLE" }
         return nextRunLabel(status.block, now: now).map { "NEXT \($0)" } ?? "NO HOURS SET"
     }
@@ -361,6 +362,10 @@ struct BlockEditor: View {
                                 ? "Locked in has no unlock, so only 3 restarts during a freeze can turn flicker off."
                                 : "Stops you switching flicker off while the computer is free.")
             }
+            if !draft.scheduleEnabled && draft.reenableDailyMinute != nil && draft.lock != .none && draft.lock != .timer {
+                PixelToggle(label: "LOCK RE-ENABLE WHILE OFF", isOn: $draft.lockScheduleAlways,
+                            detail: "Stops you switching this off for good during the evening.")
+            }
             if draft.scheduleEnabled && draft.lock != .none {
                 PixelToggle(label: "LOCK SCHEDULE OUTSIDE BLOCKED HOURS", isOn: $draft.lockScheduleAlways,
                             detail: "Stops you editing the schedule away before it starts.")
@@ -455,7 +460,8 @@ struct ActivityBadge: View {
                     .foregroundStyle(Pixel.green)
             } else {
                 Text(status.block.flicker != nil ? "FLICKER ON - FREE FOR NOW"
-                     : status.block.scheduleEnabled ? nextRunLabel(status.block, now: now).map { "NEXT RUN \($0)" } ?? "NO HOURS SET" : "IDLE")
+                     : status.block.scheduleEnabled ? nextRunLabel(status.block, now: now).map { "NEXT RUN \($0)" } ?? "NO HOURS SET"
+                     : status.block.reenableDailyMinute.map { "OFF - BACK ON AT \(clockLabel(minute: $0))" } ?? "IDLE")
                     .foregroundStyle(Pixel.inkMuted)
             }
             if let next = a.nextBreakAt {

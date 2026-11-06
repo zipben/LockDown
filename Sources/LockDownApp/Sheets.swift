@@ -197,6 +197,12 @@ func nextRunLabel(_ block: Block, now: Date) -> String? {
     return f.string(from: next).uppercased()
 }
 
+/// "7:00 AM" for minutes after midnight.
+func clockLabel(minute: Int) -> String {
+    let h = minute / 60
+    return "\(h % 12 == 0 ? 12 : h % 12):\(String(format: "%02d", minute % 60)) \(h < 12 ? "AM" : "PM")"
+}
+
 /// A block runs when you start it or by itself on a schedule. A freeze can also flicker at random.
 struct RunModePanel: View {
     @EnvironmentObject var store: Store
@@ -219,6 +225,7 @@ struct RunModePanel: View {
                 if block.kind == .frozen {
                     PixelChip(label: "RANDOM FLICKER", selected: block.flicker != nil, color: Pixel.magenta) {
                         block.scheduleEnabled = false
+                        block.reenableDailyMinute = nil
                         if block.flicker == nil { block.flicker = FlickerPolicy() }
                     }
                 }
@@ -232,6 +239,7 @@ struct RunModePanel: View {
             }
             // Switching away from manual doesn't cancel a run you already started.
             if block.scheduleEnabled || block.flicker != nil, !dirty, status?.activity.source == .timer { startButton }
+            if block.kind == .standard { reenableDaily }
         }
     }
 
@@ -244,9 +252,47 @@ struct RunModePanel: View {
     var manual: some View {
         HStack(spacing: 14) {
             startButton
-            Text(dirty || status == nil ? "SAVE FIRST, THEN START IT." : "RUNS ONLY WHEN YOU START IT.")
+            Text(dirty || status == nil ? "SAVE FIRST, THEN START IT." : block.reenableDailyMinute == nil ? "RUNS ONLY WHEN YOU START IT." : "START IT NOW, OR LET IT COME BACK ON BELOW.")
                 .font(Pixel.font(7)).foregroundStyle(Pixel.inkDim)
         }
+    }
+
+    var reenableIsOn: Binding<Bool> {
+        Binding(get: { block.reenableDailyMinute != nil }, set: { block.reenableDailyMinute = $0 ? 7 * 60 : nil })
+    }
+
+    func shiftReenable(by minutes: Int) {
+        guard let m = block.reenableDailyMinute else { return }
+        block.reenableDailyMinute = (m + minutes + 1440) % 1440
+    }
+
+    @ViewBuilder
+    var reenableDaily: some View {
+        PixelToggle(label: "RE-ENABLE DAILY", isOn: reenableIsOn,
+                    detail: "Turn it off for the evening. It comes back on and relocks.")
+        if let m = block.reenableDailyMinute {
+            HStack(spacing: 8) {
+                Text("AT").font(Pixel.font(7)).foregroundStyle(Pixel.inkDim)
+                ForEach([("-1H", -60), ("-15", -15)], id: \.0) { label, shift in
+                    Button(label) { shiftReenable(by: shift) }
+                        .buttonStyle(PixelButtonStyle(color: Pixel.panelHi, textColor: Pixel.ink, size: 8))
+                }
+                Text(clockLabel(minute: m)).font(Pixel.font(10)).foregroundStyle(Pixel.yellow).frame(minWidth: Pixel.ui(84))
+                ForEach([("+15", 15), ("+1H", 60)], id: \.0) { label, shift in
+                    Button(label) { shiftReenable(by: shift) }
+                        .buttonStyle(PixelButtonStyle(color: Pixel.panelHi, textColor: Pixel.ink, size: 8))
+                }
+            }
+            Text(reenableNote(m)).font(Pixel.font(7)).foregroundStyle(block.lock == .timer ? Pixel.red : Pixel.inkMuted)
+        }
+    }
+
+    func reenableNote(_ minute: Int) -> String {
+        if block.lock == .timer { return "LOCKED IN HAS NO UNLOCK. PICK ANOTHER LOCK TO USE THIS." }
+        let time = clockLabel(minute: minute)
+        return block.scheduleEnabled
+            ? "SKIPPED HOURS COME BACK AT \(time). OUTSIDE THE SCHEDULE IT STAYS OFF."
+            : "BACK ON AT \(time) EVERY DAY, OR ON WAKING IF THE MAC WAS ASLEEP."
     }
 
     var flickerNote: String {

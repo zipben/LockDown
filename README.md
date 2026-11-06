@@ -45,6 +45,8 @@ is stopped while a locked web block runs, it leaves DNS redirected (fails closed
 
 **When a block runs.** Each block runs when you start it, or by itself at the hours painted on its weekly schedule. A scheduled block can't be started by hand.
 
+**Re-enable daily.** A website or app block can turn itself back on and relock at a time you set, so unlocking it for the evening only lasts until then. It stays on until you next unlock it. If the Mac is asleep or off at that time, it happens on waking. A scheduled block keeps to its hours and just gets any skipped hours back. This needs a lock you can unlock, so it doesn't work with Locked In, and it isn't available on freeze blocks.
+
 **Random Flicker.** A freeze can also turn itself on and off at random, day and night, so you can't plan around when the computer is available. You set a lower and upper bound in minutes for the frozen and free windows, and each new window gets a new random length within them. Flicker starts with a free window and the app never shows when the next freeze is due. Restarting 3 times in a row during a freeze turns flicker off.
 
 **Freeze.** Full-screen lock, log out, or shut down for the duration. A freeze survives reboots, so there's an emergency exit in case the freeze screen ever breaks: restarting 3 times in a row (each within 10 minutes of the last boot) ends any running freeze, whatever its lock. Other blocks keep running.
