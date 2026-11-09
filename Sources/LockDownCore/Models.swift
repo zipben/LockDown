@@ -113,11 +113,12 @@ public struct Block: Codable, Hashable, Identifiable {
     public var titleKeywords: [String]
     public var scheduleEnabled: Bool
     public var schedule: [ScheduleRange]
-    /// Set on a freeze that runs by Random Flicker. Replaces the schedule, and is optional so state
-    /// files from older versions still load.
+    /// Set on a freeze that flickers: an independent add-on that randomly freezes day and night,
+    /// on top of any schedule or manual run. Toggle it off without touching the schedule. Frozen
+    /// blocks only, and optional so state files from older versions still load.
     public var flicker: FlickerPolicy?
     /// Minutes after midnight when the block turns itself back on and relocks every day, undoing any
-    /// unlock or stop. Standard blocks only, and optional so state files from older versions still load.
+    /// unlock or stop. Optional so state files from older versions still load.
     public var reenableDailyMinute: Int?
     public var breakPolicy: BreakPolicy
     public var lock: LockPolicy

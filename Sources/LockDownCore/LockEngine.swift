@@ -179,9 +179,36 @@ public struct LockEngine {
         return Activity(source: source, enforcing: true, endsAt: end)
     }
 
-    /// Call on every tick. Starts the next flicker window for any block whose window has ended, with
-    /// a new length drawn from its bounds. A new flicker starts free, so saving it can't lock you out
-    /// straight away. Returns true if anything changed.
+    /// A flicker block is running when it has a live phase. It gets one from `startFlicker` (by hand or
+    /// daily re-enable), not merely from being configured, so a freshly saved flicker stays off.
+    public func flickerRunning(_ block: Block, in state: EngineState) -> Bool {
+        block.flicker != nil && state.flickerPhases[block.id] != nil
+    }
+
+    /// The next flicker window, flipping frozen/free from `current` (or starting free when there is none).
+    private func nextFlickerPhase<R: RandomNumberGenerator>(_ policy: FlickerPolicy, after current: FlickerPhase?, now: Date, using rng: inout R) -> FlickerPhase {
+        let frozen = current.map { !$0.frozen } ?? false
+        let (low, high) = frozen ? (policy.frozenMinMinutes, policy.frozenMaxMinutes) : (policy.freeMinMinutes, policy.freeMaxMinutes)
+        let seconds = Int.random(in: (low * 60)...(max(low, high) * 60), using: &rng)
+        return FlickerPhase(frozen: frozen, startedAt: now, endsAt: now.addingTimeInterval(Double(seconds)))
+    }
+
+    /// Turns a flicker block on, starting with a free window so it can't lock you the instant it begins.
+    /// No-op if it isn't a flicker block or is already running.
+    public func startFlicker<R: RandomNumberGenerator>(_ id: UUID, in state: inout EngineState, now: Date, using rng: inout R) {
+        guard let block = state.blocks.first(where: { $0.id == id }), let policy = block.flicker,
+              state.flickerPhases[id] == nil else { return }
+        state.flickerPhases[id] = nextFlickerPhase(policy, after: nil, now: now, using: &rng)
+    }
+
+    public func startFlicker(_ id: UUID, in state: inout EngineState, now: Date) {
+        var rng = SystemRandomNumberGenerator()
+        startFlicker(id, in: &state, now: now, using: &rng)
+    }
+
+    /// Call on every tick. Advances a *running* flicker block to its next window once the current one
+    /// ends. Flicker that hasn't been started stays off; a block that is no longer flicker loses its
+    /// phase. Returns true if anything changed.
     public func advanceFlicker<R: RandomNumberGenerator>(_ state: inout EngineState, now: Date, using rng: inout R) -> Bool {
         var changed = false
         for block in state.blocks {
@@ -189,12 +216,9 @@ public struct LockEngine {
                 if state.flickerPhases.removeValue(forKey: block.id) != nil { changed = true }
                 continue
             }
-            let current = state.flickerPhases[block.id]
-            if let current, now < current.endsAt { continue }
-            let frozen = current.map { !$0.frozen } ?? false
-            let (low, high) = frozen ? (policy.frozenMinMinutes, policy.frozenMaxMinutes) : (policy.freeMinMinutes, policy.freeMaxMinutes)
-            let seconds = Int.random(in: (low * 60)...(max(low, high) * 60), using: &rng)
-            state.flickerPhases[block.id] = FlickerPhase(frozen: frozen, startedAt: now, endsAt: now.addingTimeInterval(Double(seconds)))
+            // No phase means flicker is off (never started, or stopped for the day). Leave it off.
+            guard let current = state.flickerPhases[block.id], now >= current.endsAt else { continue }
+            state.flickerPhases[block.id] = nextFlickerPhase(policy, after: current, now: now, using: &rng)
             changed = true
         }
         return changed
@@ -226,7 +250,10 @@ public struct LockEngine {
             state.grants[block.id] = nil
             state.skips[block.id] = nil
             state.lockBoot[block.id] = nil
-            if !block.scheduleEnabled {
+            if block.flicker != nil {
+                // Flicker comes back as flicker, not a solid freeze.
+                startFlicker(block.id, in: &state, now: now)
+            } else if !block.scheduleEnabled {
                 state.sessions[block.id] = Session(startedAt: state.sessions[block.id]?.startedAt ?? now, endsAt: nil)
             }
             reenabled.append(block)
@@ -377,6 +404,8 @@ public struct LockEngine {
 
         if block.kind != .frozen { block.flicker = nil }
         if let f = block.flicker {
+            // Flicker is its own run mode; it doesn't run on a schedule. Saving never turns it on:
+            // it waits for a manual start or its daily re-enable.
             block.scheduleEnabled = false
             guard f.frozenMinMinutes >= 1, f.freeMinMinutes >= 1 else {
                 throw EngineError.invalid("Flicker windows must be at least 1 minute.")
@@ -386,7 +415,6 @@ public struct LockEngine {
             }
         }
 
-        if block.kind == .frozen { block.reenableDailyMinute = nil }
         if let m = block.reenableDailyMinute {
             guard (0..<1440).contains(m) else { throw EngineError.invalid("Re-enable time must be within the day.") }
             if block.lock == .timer {
@@ -441,14 +469,16 @@ public struct LockEngine {
     }
 
     /// Starts (or extends) a timed run. `endsAt` nil = until stopped.
+    /// A flicker block has no timed run: starting it turns its cycle on (ignoring `endsAt`).
     public func start(_ id: UUID, endsAt: Date?, in state: inout EngineState, now: Date, bootID: String) throws {
         guard let b = state.blocks.first(where: { $0.id == id }) else { throw EngineError.notFound }
+        if b.flicker != nil {
+            startFlicker(id, in: &state, now: now)
+            return
+        }
         if let e = endsAt, e <= now { throw EngineError.invalid("End time must be in the future.") }
         if endsAt == nil, b.lock == .timer {
             throw EngineError.invalid("A locked-in block needs an end time.")
-        }
-        if b.flicker != nil, state.sessions[id] == nil {
-            throw EngineError.invalid("\(b.name) runs on Random Flicker. Switch it to manual to start it yourself.")
         }
         if b.scheduleEnabled, state.sessions[id] == nil {
             throw EngineError.invalid("\(b.name) runs on its schedule. Switch it to manual to start it yourself.")
@@ -484,9 +514,10 @@ public struct LockEngine {
         if b.scheduleEnabled, let window = scheduleWindow(b.schedule, at: now) {
             state.skips[b.id] = window.end
         }
-        // Stopping during a flicker freeze ends that freeze. The next tick starts a free window.
-        if b.flicker != nil, state.flickerPhases[b.id]?.frozen == true {
-            state.flickerPhases[b.id]?.endsAt = now
+        // Stopping a flicker block turns it off for the day. Its daily re-enable (if set) brings it
+        // back; otherwise it waits for a manual start.
+        if b.flicker != nil {
+            state.flickerPhases[b.id] = nil
         }
     }
 

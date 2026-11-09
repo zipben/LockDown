@@ -225,7 +225,6 @@ struct RunModePanel: View {
                 if block.kind == .frozen {
                     PixelChip(label: "RANDOM FLICKER", selected: block.flicker != nil, color: Pixel.magenta) {
                         block.scheduleEnabled = false
-                        block.reenableDailyMinute = nil
                         if block.flicker == nil { block.flicker = FlickerPolicy() }
                     }
                 }
@@ -238,8 +237,8 @@ struct RunModePanel: View {
                 scheduled
             }
             // Switching away from manual doesn't cancel a run you already started.
-            if block.scheduleEnabled || block.flicker != nil, !dirty, status?.activity.source == .timer { startButton }
-            if block.kind == .standard { reenableDaily }
+            if block.scheduleEnabled, !dirty, status?.activity.source == .timer { startButton }
+            reenableDaily
         }
     }
 
@@ -269,7 +268,9 @@ struct RunModePanel: View {
     @ViewBuilder
     var reenableDaily: some View {
         PixelToggle(label: "RE-ENABLE DAILY", isOn: reenableIsOn,
-                    detail: "Turn it off for the evening. It comes back on and relocks.")
+                    detail: block.flicker != nil
+                        ? "Switch flicker off for the day; it starts flickering again at this time."
+                        : "Turn it off for the evening. It comes back on and relocks.")
         if let m = block.reenableDailyMinute {
             HStack(spacing: 8) {
                 Text("AT").font(Pixel.font(7)).foregroundStyle(Pixel.inkDim)
@@ -295,10 +296,27 @@ struct RunModePanel: View {
             : "BACK ON AT \(time) EVERY DAY, OR ON WAKING IF THE MAC WAS ASLEEP."
     }
 
+    var flickerRunning: Bool { status?.flickerRunning ?? false }
+
     var flickerNote: String {
-        if dirty || status == nil { return "SAVE TO TURN FLICKER ON. IT STARTS WITH A FREE WINDOW." }
-        if status?.activity.source == .flicker { return "FROZEN NOW. A NEW LENGTH IS PICKED EACH TIME." }
-        return "FLICKER IS ON. THE NEXT FREEZE COMES WITHOUT WARNING."
+        if dirty || status == nil { return "SAVE FIRST, THEN START FLICKER." }
+        if flickerRunning {
+            return status?.activity.source == .flicker
+                ? "FROZEN NOW. A NEW LENGTH IS PICKED EACH TIME."
+                : "FLICKER IS ON. THE NEXT FREEZE COMES WITHOUT WARNING."
+        }
+        return block.reenableDailyMinute == nil
+            ? "FLICKER IS OFF. START IT WHEN YOU WANT IT RUNNING."
+            : "FLICKER IS OFF. START IT NOW, OR LET IT COME BACK ON BELOW."
+    }
+
+    @ViewBuilder
+    var flickerStartButton: some View {
+        if !flickerRunning {
+            Button("START FLICKER") { store.send(Request(.startBlock, blockID: block.id, endsAt: nil)) }
+                .buttonStyle(PixelButtonStyle(color: Pixel.green, size: 9))
+                .disabled(dirty || status == nil)
+        }
     }
 
     /// Steps by 5 above 5 minutes, snapping to multiples, and keeps each pair in order.
@@ -319,7 +337,8 @@ struct RunModePanel: View {
         Text(flickerNote).font(Pixel.font(7)).foregroundStyle(Pixel.yellow)
         flickerRow("FROZEN FOR", low: \.frozenMinMinutes, high: \.frozenMaxMinutes)
         flickerRow("FREE FOR", low: \.freeMinMinutes, high: \.freeMaxMinutes)
-        Text("Runs day and night until you switch it off.")
+        flickerStartButton
+        Text("Once on, it keeps cycling until you stop it. Stopping turns it off for the day.")
             .font(Pixel.font(7)).foregroundStyle(Pixel.inkMuted)
         if block.frozenMode != .lockScreen {
             Text("\(block.frozenMode == .logout ? "LOG OUT" : "SHUT DOWN") GIVES ONLY 20 SECONDS' NOTICE. UNSAVED WORK CAN BE LOST.")

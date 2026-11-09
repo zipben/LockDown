@@ -55,14 +55,17 @@ public struct BlockStatus: Codable, Hashable, Identifiable {
     public var locked: Bool
     public var lockReason: String
     public var allowanceRemaining: Int?
+    /// A flicker block whose cycle is currently on (it may be in a free window, so not `activity.running`).
+    public var flickerRunning: Bool
     public var id: UUID { block.id }
 
-    public init(block: Block, activity: Activity, locked: Bool, lockReason: String, allowanceRemaining: Int?) {
+    public init(block: Block, activity: Activity, locked: Bool, lockReason: String, allowanceRemaining: Int?, flickerRunning: Bool = false) {
         self.block = block
         self.activity = activity
         self.locked = locked
         self.lockReason = lockReason
         self.allowanceRemaining = allowanceRemaining
+        self.flickerRunning = flickerRunning
     }
 }
 

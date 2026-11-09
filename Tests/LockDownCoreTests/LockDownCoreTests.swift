@@ -360,7 +360,7 @@ final class FlickerTests: XCTestCase {
         let (b, initial) = flickering()
         var s = initial
         var now = t0
-        XCTAssertTrue(e.advanceFlicker(&s, now: now))
+        e.startFlicker(b.id, in: &s, now: now)
         var expectFrozen = false
         var frozenLengths = Set<TimeInterval>(), freeLengths = Set<TimeInterval>()
         for _ in 0..<400 {
@@ -390,7 +390,7 @@ final class FlickerTests: XCTestCase {
         let (b, initial) = flickering()
         var s = initial
         s.blocks[0].flicker = FlickerPolicy(frozenMinMinutes: 7, frozenMaxMinutes: 7, freeMinMinutes: 3, freeMaxMinutes: 3)
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(b.id, in: &s, now: t0)
         XCTAssertEqual(s.flickerPhases[b.id]?.endsAt, t0 + 180)
         _ = e.advanceFlicker(&s, now: t0 + 180)
         XCTAssertEqual(s.flickerPhases[b.id]?.endsAt, t0 + 180 + 420)
@@ -399,7 +399,7 @@ final class FlickerTests: XCTestCase {
     func testWakingAfterALongSleepDrawsFromNow() {
         let (b, initial) = flickering()
         var s = initial
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(b.id, in: &s, now: t0)
         let later = t0 + 86400
         XCTAssertTrue(e.advanceFlicker(&s, now: later))
         let p = s.flickerPhases[b.id]!
@@ -411,7 +411,7 @@ final class FlickerTests: XCTestCase {
     func testStateSurvivesRoundTrip() throws {
         let (b, initial) = flickering()
         var s = initial
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(b.id, in: &s, now: t0)
         let decoded = try JSONDecoder().decode(EngineState.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(decoded.flickerPhases[b.id], s.flickerPhases[b.id])
         XCTAssertEqual(decoded.blocks.first?.flicker, policy)
@@ -436,29 +436,45 @@ final class FlickerTests: XCTestCase {
         XCTAssertThrowsError(try e.save(bad, newPassword: nil, into: &s, now: t0, bootID: "A"))
         bad.flicker = FlickerPolicy(frozenMinMinutes: 0)
         XCTAssertThrowsError(try e.save(bad, newPassword: nil, into: &s, now: t0, bootID: "A"))
+        // Flicker is its own run mode, so saving it clears the schedule...
         let both = Block(name: "C", kind: .frozen, scheduleEnabled: true, flicker: policy)
         try e.save(both, newPassword: nil, into: &s, now: t0, bootID: "A")
         XCTAssertFalse(s.blocks[0].scheduleEnabled)
+        XCTAssertEqual(s.blocks[0].flicker, policy)
+        // ...and does not turn it on (no phase yet).
+        XCTAssertNil(s.flickerPhases[s.blocks[0].id])
+        XCTAssertFalse(e.flickerRunning(s.blocks[0], in: s))
+        // Flicker is frozen-only; a standard block drops it.
         let standard = Block(name: "D", flicker: policy)
         try e.save(standard, newPassword: nil, into: &s, now: t0, bootID: "A")
         XCTAssertNil(s.blocks[1].flicker)
     }
 
-    func testCantBeStartedByHand() {
+    func testStartTurnsFlickerOnAndIsIdempotent() throws {
         let (b, initial) = flickering()
         var s = initial
-        XCTAssertThrowsError(try e.start(b.id, endsAt: t0 + 60, in: &s, now: t0, bootID: "A"))
+        XCTAssertFalse(e.flickerRunning(b, in: s))
+        // Starting kicks off the cycle (a free window) rather than a timed session.
+        try e.start(b.id, endsAt: nil, in: &s, now: t0, bootID: "A")
+        XCTAssertNil(s.sessions[b.id])
+        XCTAssertTrue(e.flickerRunning(b, in: s))
+        XCTAssertEqual(s.flickerPhases[b.id]?.frozen, false)
+        // Starting again while it's already on doesn't reset the current window.
+        let phase = s.flickerPhases[b.id]
+        try e.start(b.id, endsAt: nil, in: &s, now: t0 + 30, bootID: "A")
+        XCTAssertEqual(s.flickerPhases[b.id], phase)
     }
 
-    func testStopEndsThisFreezeButFlickerStaysOn() throws {
+    func testStopTurnsFlickerOffForTheDay() throws {
         let (b, initial) = flickering()
         var s = initial
         s.flickerPhases[b.id] = FlickerPhase(frozen: true, startedAt: t0, endsAt: t0 + 900)
         try e.stop(b.id, in: &s, now: t0 + 60, bootID: "A")
-        XCTAssertFalse(e.activity(of: b, in: s, now: t0 + 60).running)
-        XCTAssertTrue(e.advanceFlicker(&s, now: t0 + 62))
-        XCTAssertEqual(s.flickerPhases[b.id]?.frozen, false)
-        XCTAssertNotNil(s.blocks[0].flicker)
+        XCTAssertNil(s.flickerPhases[b.id])
+        XCTAssertFalse(e.flickerRunning(b, in: s))
+        // It stays off; a tick does not resurrect it.
+        XCTAssertFalse(e.advanceFlicker(&s, now: t0 + 62))
+        XCTAssertNil(s.flickerPhases[b.id])
     }
 
     func testLockedFreezeCantBeStoppedOrLoosened() throws {
@@ -483,11 +499,11 @@ final class FlickerTests: XCTestCase {
     func testBetweenFreezesLockOnlyHoldsWithTheOption() throws {
         let (plain, initial) = flickering(lock: .randomText(length: 5))
         var s = initial
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(plain.id, in: &s, now: t0)
         XCTAssertFalse(e.isLocked(plain, in: s, now: t0 + 1, bootID: "A"))
         let (guarded, initial2) = flickering(lock: .randomText(length: 5), always: true)
         s = initial2
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(guarded.id, in: &s, now: t0)
         XCTAssertTrue(e.isLocked(guarded, in: s, now: t0 + 1, bootID: "A"))
         var off = guarded
         off.flicker = nil
@@ -496,7 +512,7 @@ final class FlickerTests: XCTestCase {
 
     func testTurningOffRemovesThePhase() throws {
         var (b, s) = flickering()
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(b.id, in: &s, now: t0)
         b.flicker = nil
         try e.save(b, newPassword: nil, into: &s, now: t0 + 1, bootID: "A")
         XCTAssertTrue(e.advanceFlicker(&s, now: t0 + 2))
@@ -514,7 +530,7 @@ final class FlickerTests: XCTestCase {
     func testDeleteClearsThePhase() throws {
         let (b, initial) = flickering()
         var s = initial
-        _ = e.advanceFlicker(&s, now: t0)
+        e.startFlicker(b.id, in: &s, now: t0)
         try e.delete(b.id, from: &s, now: t0 + 1, bootID: "A")
         XCTAssertNil(s.flickerPhases[b.id])
     }
@@ -658,8 +674,21 @@ final class DailyReenableTests: XCTestCase {
         var s = EngineState()
         XCTAssertThrowsError(try e.save(Block(name: "T", reenableDailyMinute: 420, lock: .timer), newPassword: nil, into: &s, now: at(10, 20), bootID: "A"))
         XCTAssertThrowsError(try e.save(Block(name: "M", reenableDailyMinute: 1440), newPassword: nil, into: &s, now: at(10, 20), bootID: "A"))
+        // Freeze blocks can re-enable daily too, just like standard blocks.
         try e.save(Block(name: "F", kind: .frozen, reenableDailyMinute: 420), newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
-        XCTAssertNil(s.blocks[0].reenableDailyMinute)
+        XCTAssertEqual(s.blocks[0].reenableDailyMinute, 420)
+    }
+
+    func testFreezeReenableBringsTheFreezeBackOn() throws {
+        var s = EngineState()
+        let b = Block(name: "F", kind: .frozen, reenableDailyMinute: 420, lock: .randomText(length: 5))
+        try e.save(b, newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
+        // First tick only records the baseline; nothing re-enables yet.
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(10, 20)).isEmpty)
+        // Past 7:00 the next day it relocks and starts an until-stopped freeze.
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(11, 7)).map(\.id), [b.id])
+        XCTAssertNotNil(s.sessions[b.id])
+        XCTAssertNil(s.sessions[b.id]?.endsAt)
     }
 
     func testTurningOffStopsItAndClearsItsRecord() throws {
@@ -676,5 +705,19 @@ final class DailyReenableTests: XCTestCase {
         let decoded = try JSONDecoder().decode(EngineState.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(decoded.reenableChecked[b.id], s.reenableChecked[b.id])
         XCTAssertEqual(decoded.blocks[0].reenableDailyMinute, 420)
+    }
+
+    func testFlickerReenablesAsFlickerNotASolidFreeze() throws {
+        let b = Block(name: "FL", kind: .frozen, flicker: FlickerPolicy(), reenableDailyMinute: 420, lock: lock)
+        var s = EngineState()
+        try e.save(b, newPassword: nil, into: &s, now: at(10, 20), bootID: "A")
+        // Saving configures flicker without turning it on.
+        XCTAssertFalse(e.flickerRunning(s.blocks[0], in: s))
+        XCTAssertTrue(e.applyDailyReenable(&s, now: at(10, 20)).isEmpty)
+        // The next day at 7:00 it comes back as flicker (a free phase), not a solid freeze session.
+        XCTAssertEqual(e.applyDailyReenable(&s, now: at(11, 7)).map(\.id), [b.id])
+        XCTAssertTrue(e.flickerRunning(s.blocks[0], in: s))
+        XCTAssertNil(s.sessions[b.id])
+        XCTAssertEqual(s.flickerPhases[b.id]?.frozen, false)
     }
 }

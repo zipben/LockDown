@@ -373,7 +373,8 @@ final class Daemon {
                 activity: engine.activity(of: b, in: state, now: now),
                 locked: engine.isLocked(b, in: state, now: now, bootID: bootID),
                 lockReason: engine.lockReason(b),
-                allowanceRemaining: engine.allowanceRemaining(b, in: state, now: now))
+                allowanceRemaining: engine.allowanceRemaining(b, in: state, now: now),
+                flickerRunning: engine.flickerRunning(b, in: state))
         }
         let today = engine.dayKey(now)
         let lastDays = (0..<7).reversed().map { engine.dayKey(now.addingTimeInterval(-Double($0) * 86400)) }

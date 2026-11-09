@@ -48,7 +48,7 @@ enum PreviewRender {
 
         let flicker = Block(name: "Flicker", kind: .frozen, flicker: FlickerPolicy(), lock: .randomText(length: 40), lockScheduleAlways: true)
         let flickering = Snapshot(now: now, blocks: [
-            BlockStatus(block: flicker, activity: .idle, locked: true, lockReason: "", allowanceRemaining: nil),
+            BlockStatus(block: flicker, activity: .idle, locked: true, lockReason: "", allowanceRemaining: nil, flickerRunning: true),
         ], settings: GlobalSettings(), health: health, stats: stats, anyLocked: false)
 
         let daily = Block(name: "Evening Pass", websites: ["reddit.com"], reenableDailyMinute: 7 * 60, lock: .randomText(length: 40), lockScheduleAlways: true)
